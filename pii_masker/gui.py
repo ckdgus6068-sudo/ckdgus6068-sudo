@@ -73,9 +73,10 @@ class App:
         self.party_list = tk.Listbox(f, height=4)
         self.party_list.pack(fill="both", expand=True, padx=6, pady=4)
         io = ttk.Frame(f); io.pack(fill="x", padx=6, pady=2)
-        ttk.Button(io, text="명단 불러오기(JSON)", command=self.load_parties).pack(side="left")
-        ttk.Button(io, text="명단 저장(JSON)", command=self.save_parties).pack(side="left", padx=4)
-        ttk.Button(io, text="선택 제거", command=self.remove_party).pack(side="left")
+        ttk.Button(io, text="명단 초안 자동생성", command=self.make_draft).pack(side="left")
+        ttk.Button(io, text="명단 불러오기(JSON)", command=self.load_parties).pack(side="left", padx=4)
+        ttk.Button(io, text="명단 저장(JSON)", command=self.save_parties).pack(side="left")
+        ttk.Button(io, text="선택 제거", command=self.remove_party).pack(side="left", padx=4)
 
     def add_party(self):
         label = self.e_label.get().strip()
@@ -102,6 +103,44 @@ class App:
             self.party_list.insert("end", f"{party['label']}  |  "
                                    f"{', '.join(party.get('names', []))}  |  "
                                    f"{', '.join(party.get('ids', []))}")
+
+    def make_draft(self):
+        if not self.files:
+            messagebox.showwarning("확인", "먼저 1번에서 PDF를 추가하세요.")
+            return
+        if not messagebox.askyesno(
+                "명단 초안 자동생성",
+                "첫 번째 PDF를 분석해 마스킹 후보(인물·회사) 명단 초안을 만듭니다.\n"
+                "· OCR이라 시간이 걸립니다(엔진 tesseract 권장)\n"
+                "· 역할(피의자/참고인 등)은 추정값이라 반드시 검토·수정하세요\n\n진행할까요?"):
+            return
+        self.run_btn.config(state="disabled")
+        self.prog.start(12)
+        threading.Thread(target=self._draft_worker, daemon=True).start()
+
+    def _draft_worker(self):
+        try:
+            from masker import Masker
+            m = Masker(ocr_engine=self.engine.get())
+            self._logmsg(f"명단 초안 분석 중 (engine={self.engine.get()}, OCR) ...")
+            parties, report = m.suggest_parties(self.files[0])
+            self._logmsg(report)
+            self.root.after(0, lambda: self._load_draft(parties))
+        except Exception as e:
+            self._logmsg(f"[오류] {type(e).__name__}: {e}")
+        finally:
+            self.root.after(0, self._done)
+
+    def _load_draft(self, parties):
+        self.parties.clear()
+        self.party_list.delete(0, "end")
+        for p in parties:
+            self.parties.append(p)
+            self.party_list.insert("end", f"{p['label']}  |  "
+                                   f"{', '.join(p.get('names', []))}  |  "
+                                   f"{', '.join(p.get('ids', []))}")
+        self._logmsg(f"→ 초안 {len(parties)}건을 명단에 넣었습니다. 라벨을 확인하고, "
+                     "필요하면 '명단 저장(JSON)'으로 보관 후 메모장에서 수정하세요.")
 
     def save_parties(self):
         p = filedialog.asksaveasfilename(defaultextension=".json",

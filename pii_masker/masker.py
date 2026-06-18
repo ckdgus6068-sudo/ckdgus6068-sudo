@@ -303,6 +303,21 @@ class Masker:
                   label, fill="white", font=font)
 
     # --- 메인 ------------------------------------------------------------
+    def suggest_parties(self, in_pdf):
+        """문서를 OCR해 마스킹 후보 명단 초안 + 검토 리포트를 만든다.
+
+        반환: (parties_list, report_text). 결과는 사람이 검토·수정해야 한다.
+        """
+        import suggest as _sg
+        doc = fitz.open(in_pdf)
+        line_texts = []
+        for page in doc:
+            pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_SCALE, RENDER_SCALE))
+            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+            for toks in self._ocr_lines(img):
+                line_texts.append("".join(t[CH] for t in toks))
+        return _sg.build_draft(_sg.suggest(line_texts))
+
     def process(self, in_pdf, out_pdf, audit_path=None):
         doc = fitz.open(in_pdf)
         out_images = []
