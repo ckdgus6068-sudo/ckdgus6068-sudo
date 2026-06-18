@@ -114,12 +114,13 @@ def _union(tokens):
 
 class Masker:
     def __init__(self, parties_path=None, mapping_path=None, ocr_engine="tesseract",
-                 ner=None):
+                 ner=None, paddle_model_dir=None):
         self.parties = _load_parties(parties_path)
         self.pseudo = Pseudonymizer(mapping_path)
         self.ocr_engine = ocr_engine
         self.ner = ner  # KoreanNER 인스턴스 또는 None
-        self._reader = None  # EasyOCR 지연 초기화
+        self.paddle_model_dir = paddle_model_dir  # 오프라인 로컬 모델 경로
+        self._reader = None  # OCR 엔진 지연 초기화
         self.audit: list[AuditItem] = []
         # 시드 식별값을 라벨에 고정 등록(여러 문서에서 일관)
         for p in self.parties:
@@ -134,6 +135,17 @@ class Masker:
                 import easyocr
                 self._reader = easyocr.Reader(["ko", "en"], gpu=False, verbose=False)
             return ocr_backends.easyocr_lines(img, self._reader)
+        if self.ocr_engine == "paddleocr":
+            if self._reader is None:
+                from paddleocr import PaddleOCR
+                kw = dict(lang="korean", use_doc_orientation_classify=False,
+                          use_doc_unwarping=False, use_textline_orientation=False)
+                # 오프라인: 로컬 모델 경로 지정(없으면 기본 다운로드 시도)
+                if self.paddle_model_dir:
+                    kw["text_detection_model_dir"] = f"{self.paddle_model_dir}/det"
+                    kw["text_recognition_model_dir"] = f"{self.paddle_model_dir}/rec"
+                self._reader = PaddleOCR(**kw)
+            return ocr_backends.paddleocr_lines(img, self._reader)
         return ocr_backends.tesseract_lines(img)
 
     # --- 시드 이름 매칭 ---------------------------------------------------
@@ -322,7 +334,10 @@ if __name__ == "__main__":
     ap.add_argument("--parties", help="관련자 명단 JSON")
     ap.add_argument("--mapping", help="가명 대응표 저장 경로")
     ap.add_argument("--audit", help="감사 리포트 저장 경로")
-    ap.add_argument("--engine", choices=["tesseract", "easyocr"], default="tesseract")
+    ap.add_argument("--engine", choices=["tesseract", "easyocr", "paddleocr"],
+                    default="tesseract")
+    ap.add_argument("--paddle-model-dir",
+                    help="(paddleocr) 오프라인 로컬 모델 폴더(det/, rec/ 하위)")
     ap.add_argument("--ner", action="store_true", help="한글 NER로 제3자 이름·주소 보조 탐지")
     ap.add_argument("--ner-backend", choices=["spacy", "transformers"], default="spacy")
     ap.add_argument("--ner-model", default="ko_core_news_sm",
@@ -333,7 +348,8 @@ if __name__ == "__main__":
         from ner import KoreanNER
         ner = KoreanNER(backend=args.ner_backend, model=args.ner_model)
     m = Masker(parties_path=args.parties, mapping_path=args.mapping,
-               ocr_engine=args.engine, ner=ner)
+               ocr_engine=args.engine, ner=ner,
+               paddle_model_dir=args.paddle_model_dir)
     items = m.process(args.input, args.output, audit_path=args.audit)
     print(f"마스킹 완료: {len(items)}건 → {args.output} "
           f"(engine={args.engine}, ner={'on' if ner else 'off'})")

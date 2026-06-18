@@ -64,3 +64,28 @@ def easyocr_lines(img, reader):
         if toks:
             out.append(toks)
     return out
+
+
+def paddleocr_lines(img, ocr):
+    """PaddleOCR(3.x): 인식 세그먼트 1개 = 1줄, 글자 단위로 비례 분할.
+
+    주의: 이 개발 샌드박스는 PaddleOCR 모델 호스터(BOS/HF/ModelScope)가
+    네트워크 정책으로 차단되어 런타임 검증을 하지 못했다. 운영(오프라인)에서는
+    모델을 미리 받아 동봉하고 PaddleOCR에 로컬 모델 경로를 지정해 사용한다.
+    API는 PaddleOCR 3.x 기준(predict → rec_texts/rec_polys/rec_scores).
+    """
+    res = ocr.predict(np.array(img))
+    if not res:
+        return []
+    r = res[0]
+    texts = r["rec_texts"]
+    polys = r.get("rec_polys", r.get("dt_polys"))
+    scores = r["rec_scores"]
+    out = []
+    for text, poly, score in zip(texts, polys, scores):
+        xs = [float(p[0]) for p in poly]
+        ys = [float(p[1]) for p in poly]
+        toks = _split_chars(text, min(xs), min(ys), max(xs), max(ys), float(score))
+        if toks:
+            out.append(toks)
+    return out
