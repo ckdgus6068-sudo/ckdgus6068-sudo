@@ -10,6 +10,7 @@ import io
 import json
 import re
 from dataclasses import dataclass, asdict, field
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -26,6 +27,8 @@ RENDER_SCALE = 3
 FONT_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
 # OCR 신뢰도 경고 임계값
 LOW_CONF = 60
+# 시드 이름 퍼지 매칭 유사도 임계값(0~1) — 낮을수록 과매칭 위험
+FUZZY_THRESHOLD = 0.8
 
 
 @dataclass
@@ -95,42 +98,91 @@ class Masker:
         반환: [(label, bbox, conf, ocr_text), ...] — 이름이 여러 줄에 걸치면
         줄별로 박스를 나눠 과도한 검은칠을 막는다.
         """
-        # 공백 제거한 페이지 문자열 + 각 문자가 속한 단어 인덱스
-        despaced, char_word = [], []
+        # 공백 제거한 페이지 문자열 + 각 문자의 (단어 인덱스, 줄 인덱스)
+        despaced, char_word, char_line = [], [], []
         for wi, w in enumerate(all_words):
             for ch in w[0]:
                 if not ch.isspace():
                     despaced.append(ch)
                     char_word.append(wi)
+                    char_line.append(w[6])
         despaced = "".join(despaced)
+        N = len(despaced)
 
-        results = []
+        # 매칭할 이름 키 목록 (긴 이름부터 — 더 구체적인 매칭 우선)
+        keys = []
         for party in self.parties:
             for name in party.names:
-                key = _norm(name)
-                if not key:
-                    continue
-                start = 0
-                while True:
-                    pos = despaced.find(key, start)
-                    if pos == -1:
+                k = _norm(name)
+                if len(k) >= 2:
+                    keys.append((len(k), k, party.label))
+        keys.sort(reverse=True)
+
+        claimed = [False] * N  # 같은 글자 중복 매칭 방지
+        found: list[tuple[int, int, str]] = []  # (start, end, label)
+
+        # 1) 페이지 전체 '정확' 매칭 — 줄바꿈으로 쪼개진 이름도 잡고, 오탐 없음
+        for L, key, label in keys:
+            start = 0
+            while True:
+                pos = despaced.find(key, start)
+                if pos < 0:
+                    break
+                if not any(claimed[pos:pos + L]):
+                    found.append((pos, pos + L, label))
+                    for j in range(pos, pos + L):
+                        claimed[j] = True
+                start = pos + L
+
+        # 2) '한 줄 안' 퍼지 매칭 — OCR 글자오류(여인인석 등) 흡수. 줄 경계는 넘지 않음
+        for L, key, label in keys:
+            i = 0
+            while i <= N - 2:
+                best = None  # (ratio, end)
+                for w in range(max(2, L - 1), L + 3):
+                    e = i + w
+                    if e > N:
                         break
-                    word_idxs = sorted(set(char_word[pos:pos + len(key)]))
-                    # 줄(line_idx)별로 묶어 박스 생성
-                    by_line: dict[int, list[int]] = {}
-                    for i in word_idxs:
-                        by_line.setdefault(all_words[i][6], []).append(i)
-                    for idxs in by_line.values():
-                        xs = [all_words[i][1] for i in idxs]
-                        ys = [all_words[i][2] for i in idxs]
-                        xe = [all_words[i][1] + all_words[i][3] for i in idxs]
-                        ye = [all_words[i][2] + all_words[i][4] for i in idxs]
-                        conf = min(all_words[i][5] for i in idxs)
-                        bbox = [min(xs), min(ys), max(xe), max(ye)]
-                        txt = " ".join(all_words[i][0] for i in idxs)
-                        results.append((party.label, bbox, conf, txt))
-                    start = pos + len(key)
+                    if len(set(char_line[i:e])) != 1:  # 한 줄 안에서만
+                        continue
+                    r = SequenceMatcher(None, despaced[i:e], key).ratio()
+                    if r >= FUZZY_THRESHOLD and (best is None or r > best[0]):
+                        best = (r, e)
+                if best and not any(claimed[i:best[1]]):
+                    s2, e2 = self._tighten(despaced, i, best[1], key)
+                    found.append((s2, e2, label))
+                    for j in range(s2, e2):
+                        claimed[j] = True
+                    i = e2
+                else:
+                    i += 1
+
+        # 매칭 구간 → 줄별 박스
+        results = []
+        for s, e, label in found:
+            word_idxs = sorted(set(char_word[s:e]))
+            by_line: dict[int, list[int]] = {}
+            for i in word_idxs:
+                by_line.setdefault(all_words[i][6], []).append(i)
+            for idxs in by_line.values():  # 이름이 여러 줄에 걸치면 줄별 박스
+                xs = [all_words[i][1] for i in idxs]
+                ys = [all_words[i][2] for i in idxs]
+                xe = [all_words[i][1] + all_words[i][3] for i in idxs]
+                ye = [all_words[i][2] + all_words[i][4] for i in idxs]
+                conf = min(all_words[i][5] for i in idxs)
+                bbox = [min(xs), min(ys), max(xe), max(ye)]
+                txt = " ".join(all_words[i][0] for i in idxs)
+                results.append((label, bbox, conf, txt))
         return results
+
+    @staticmethod
+    def _tighten(despaced, s, e, key):
+        """퍼지 창 양끝의 미매칭 글자를 잘라 박스를 키워드에 밀착시킨다."""
+        sm = SequenceMatcher(None, despaced[s:e], key)
+        blocks = [b for b in sm.get_matching_blocks() if b.size > 0]
+        if not blocks:
+            return s, e
+        return s + blocks[0].a, s + blocks[-1].a + blocks[-1].size
 
     def _spans_to_boxes(self, line_text, words, spans):
         """줄 내 문자 구간(span)을 OCR 단어 박스들과 매칭해 통합 박스 산출."""
