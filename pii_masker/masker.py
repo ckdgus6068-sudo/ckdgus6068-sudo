@@ -177,7 +177,9 @@ class Masker:
                     kw["model_storage_directory"] = mdir
                     kw["download_enabled"] = False
                 self._reader = easyocr.Reader(["ko", "en"], **kw)
-            return ocr_backends.easyocr_lines(img, self._reader)
+            # 메모리 절약: 내부 처리 이미지 크기 제한(기본 1600). 폭탄 할당 방지
+            canvas = os.environ.get("EASYOCR_CANVAS_SIZE", "1600")
+            return ocr_backends.easyocr_lines(img, self._reader, canvas_size=canvas)
         if self.ocr_engine == "paddleocr":
             if self._reader is None:
                 from paddleocr import PaddleOCR

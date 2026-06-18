@@ -75,9 +75,15 @@ def tesseract_lines(img):
     return lines
 
 
-def easyocr_lines(img, reader):
-    """EasyOCR: 인식 세그먼트 1개 = 1줄, 글자 단위로 비례 분할."""
-    res = reader.readtext(np.array(img), detail=1, paragraph=False)
+def easyocr_lines(img, reader, canvas_size=None):
+    """EasyOCR: 인식 세그먼트 1개 = 1줄, 글자 단위로 비례 분할.
+
+    canvas_size: 내부 처리 이미지의 최대 변 길이. 작을수록 메모리↓(정확도↓).
+    """
+    kw = dict(detail=1, paragraph=False)
+    if canvas_size:
+        kw["canvas_size"] = int(canvas_size)
+    res = reader.readtext(np.array(img), **kw)
     out = []
     for box, text, conf in res:
         xs = [p[0] for p in box]
