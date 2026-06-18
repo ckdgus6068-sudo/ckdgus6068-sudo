@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass, asdict, field
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -23,8 +24,8 @@ from detectors import detect_structured
 from pseudonym import Pseudonymizer
 import ocr_backends
 
-# 렌더 배율(72dpi 기준) — 3이면 약 216dpi
-RENDER_SCALE = 3
+# 렌더 배율(72dpi 기준) — 2면 약 144dpi. 메모리 부족 시 PII_RENDER_SCALE로 조절
+RENDER_SCALE = float(os.environ.get("PII_RENDER_SCALE", "2"))
 
 
 def _find_font():
@@ -44,6 +45,25 @@ def _find_font():
 
 
 FONT_PATH = _find_font()
+
+
+def _bundled_dir(*parts):
+    """동봉 리소스 경로 후보(빌드본/소스/실행파일 옆) 중 존재하는 첫 경로."""
+    bases = []
+    if getattr(sys, "frozen", False):           # PyInstaller 빌드본
+        bases.append(Path(sys._MEIPASS))
+        bases.append(Path(sys.executable).resolve().parent)
+    bases.append(Path(__file__).resolve().parent)
+    for b in bases:
+        p = b.joinpath(*parts)
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _easyocr_model_dir():
+    """동봉된 EasyOCR 모델 폴더(.pth 들어있는 곳). 없으면 None(온라인 다운로드)."""
+    return os.environ.get("EASYOCR_MODEL_DIR") or _bundled_dir("models", "easyocr")
 # OCR 신뢰도 경고 임계값
 LOW_CONF = 0.6
 # 시드 이름 퍼지 매칭 유사도 임계값 — 짧은 이름은 오탐 방지를 위해 높게,
@@ -151,7 +171,12 @@ class Masker:
         if self.ocr_engine == "easyocr":
             if self._reader is None:
                 import easyocr
-                self._reader = easyocr.Reader(["ko", "en"], gpu=False, verbose=False)
+                kw = dict(gpu=False, verbose=False)
+                mdir = _easyocr_model_dir()
+                if mdir:  # 오프라인: 동봉 모델 사용 + 다운로드 금지
+                    kw["model_storage_directory"] = mdir
+                    kw["download_enabled"] = False
+                self._reader = easyocr.Reader(["ko", "en"], **kw)
             return ocr_backends.easyocr_lines(img, self._reader)
         if self.ocr_engine == "paddleocr":
             if self._reader is None:
