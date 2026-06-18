@@ -11,6 +11,27 @@
 import numpy as np
 
 
+def _ensure_tesseract():
+    """Windows에서 tesseract.exe 위치를 자동 지정(PATH 미설정 대비)."""
+    import os
+    import shutil
+    import pytesseract
+    env = os.environ.get("TESSERACT_CMD")
+    if env and os.path.exists(env):
+        pytesseract.pytesseract.tesseract_cmd = env
+        return
+    if shutil.which("tesseract"):
+        return
+    for p in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tesseract-OCR\tesseract.exe"),
+    ):
+        if os.path.exists(p):
+            pytesseract.pytesseract.tesseract_cmd = p
+            return
+
+
 def _split_chars(text, x0, y0, x1, y1, conf):
     """한 덩어리(단어/문장) 박스를 글자별 비례 박스로 분할(공백 포함)."""
     n = len(text)
@@ -31,6 +52,7 @@ def tesseract_lines(img):
     """
     import pytesseract
     from pytesseract import Output
+    _ensure_tesseract()
     d = pytesseract.image_to_data(img, lang="kor+eng", output_type=Output.DICT)
     words: dict[tuple, list] = {}
     for i in range(len(d["text"])):
