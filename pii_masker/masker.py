@@ -244,11 +244,19 @@ class Masker:
                     if r >= thr and (best is None or r > best[0]):
                         best = (r, e)
                 if best and not any(claimed[i:best[1]]):
-                    s2, e2 = self._tighten(despaced, i, best[1], key)
-                    found.append((s2, e2, label))
-                    for j in range(s2, e2):
-                        claimed[j] = True
-                    i = e2
+                    s2, te = self._tighten(despaced, i, best[1], key)
+                    # 띄어쓴 이름의 끝글자 누락 방지: 같은 줄에서 최소 키 길이만큼 덮는다
+                    e2 = max(te, s2)
+                    line0 = all_chars[d2t[s2]][LINE]
+                    while (e2 - s2) < L and e2 < N and all_chars[d2t[e2]][LINE] == line0:
+                        e2 += 1
+                    if not any(claimed[s2:e2]):
+                        found.append((s2, e2, label))
+                        for j in range(s2, e2):
+                            claimed[j] = True
+                        i = e2
+                    else:
+                        i += 1
                 else:
                     i += 1
 
@@ -276,10 +284,9 @@ class Masker:
     # --- 검은칠 ----------------------------------------------------------
     def _redact(self, draw, bbox, label):
         x0, y0, x1, y1 = bbox
-        # 비례 분할 오차로 글자가 삐져나오는 것을 막기 위해 가로로 넉넉히 확장
-        # (글자 폭 ≈ 글자 높이). 누락보다 약간의 과(過)마스킹이 안전.
-        mx = max(2, int((y1 - y0) * 0.5))
-        my = 2
+        # 비례 분할 오차 보정용 여백(작게). 너무 크면 박스가 어색해지므로 절제.
+        mx = max(2, int((y1 - y0) * 0.18))
+        my = max(1, int((y1 - y0) * 0.06))
         x0, y0, x1, y1 = x0 - mx, y0 - my, x1 + mx, y1 + my
         draw.rectangle([x0, y0, x1, y1], fill="black")
         h = max(12, int((y1 - y0) * 0.8))
