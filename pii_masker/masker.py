@@ -10,6 +10,7 @@ OCR 토큰을 글자 단위로 통일하므로 탐지 구간이 박스에 정밀
 """
 import io
 import json
+import os
 import re
 from dataclasses import dataclass, asdict, field
 from difflib import SequenceMatcher
@@ -24,8 +25,25 @@ import ocr_backends
 
 # 렌더 배율(72dpi 기준) — 3이면 약 216dpi
 RENDER_SCALE = 3
-# 한글 라벨용 폰트
-FONT_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+
+
+def _find_font():
+    """한글 라벨용 폰트 경로 탐색(동봉본 → 플랫폼 기본)."""
+    here = Path(__file__).resolve().parent
+    candidates = [
+        os.environ.get("PII_FONT"),
+        str(here / "assets" / "NanumGothic.ttf"),   # 동봉(오프라인 배포)
+        "C:/Windows/Fonts/malgun.ttf",               # Windows 맑은 고딕
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/Library/Fonts/AppleGothic.ttf",            # macOS
+    ]
+    for c in candidates:
+        if c and Path(c).exists():
+            return c
+    raise FileNotFoundError("한글 폰트를 찾을 수 없습니다. PII_FONT 환경변수로 지정하세요.")
+
+
+FONT_PATH = _find_font()
 # OCR 신뢰도 경고 임계값
 LOW_CONF = 0.6
 # 시드 이름 퍼지 매칭 유사도 임계값 — 짧은 이름은 오탐 방지를 위해 높게,

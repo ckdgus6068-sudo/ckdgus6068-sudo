@@ -17,11 +17,26 @@ PDF → 페이지 이미지 렌더 → OCR(좌표 포함) → 개인정보 탐�
 
 - `detectors.py` — 정형 개인정보(주민번호·전화·사업자번호·이메일·계좌·사건번호) 정규식
 - `pseudonym.py` — 일관된 가명화 + 대응표(로컬 JSON) 저장/복원
-- `ocr_backends.py` — 교체 가능한 OCR 백엔드(Tesseract / EasyOCR), 글자 단위 토큰으로 정규화
-- `masker.py` — 전체 파이프라인 (OCR·탐지·검은칠·PDF 재생성·감사 리포트)
+- `ocr_backends.py` — 교체 가능한 OCR 백엔드(Tesseract / EasyOCR / PaddleOCR)
+- `ner.py` — (선택) 한글 NER 보조 탐지(spaCy / transformers 로컬 모델)
+- `masker.py` — 전체 파이프라인 (OCR·탐지·검은칠·PDF 재생성·감사 리포트) + CLI
+- `gui.py` — 데스크톱 GUI(Tkinter, 오프라인). 일반 사용자용 진입점
 - `parties.example.json` — 관련자 명단 시드(고소인/피의자 이름·식별값 → 가명)
+- `assets/NanumGothic.ttf` — 라벨용 한글 폰트(동봉)
+- `packaging/` — 오프라인 Windows 단일 실행본(.exe) 빌드 스크립트/가이드
 
-## 사용법
+## 실행 방법
+
+### GUI (일반 사용자)
+
+```bash
+python3 gui.py
+```
+
+PDF 추가 → 관련자 명단 입력 → 엔진 선택 → 마스킹 실행.
+오프라인 Windows 배포본 빌드는 `packaging/README_PACKAGING.md` 참고.
+
+### CLI
 
 ```bash
 python3 masker.py 입력.pdf 출력.pdf \
