@@ -66,6 +66,42 @@ def _load_parties(path):
     return [Party(**p) for p in data.get("parties", [])]
 
 
+def _overlap(a, b):
+    """두 박스가 겹치는지(축 정렬 사각형)."""
+    return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+
+
+_HANGUL = re.compile(r"[가-힣]")
+# 인명에 흔히 붙는 조사 — 끝에서 떼어내 길이 판단
+_JOSA = ("은", "는", "이", "가", "을", "를", "에게", "와", "과", "의", "도", "께", "께서")
+# NER이 사람으로 오탐하기 쉬운 일반어(법률문서 빈출) — 제외
+_NER_STOP = {"본건사업", "수익배분", "고소인", "피고소인", "참고인", "피의자"}
+
+
+def _ner_keep(ptype, text, seg) -> bool:
+    """NER 결과를 채택할지 — 노이즈 OCR의 과마스킹을 줄이는 보수적 필터."""
+    avg_conf = sum(t[CONF] for t in seg) / len(seg)
+    # OCR conf 스케일: easyocr 0~1, tesseract 0~100 → 둘 다 저신뢰 컷
+    conf_ok = avg_conf >= (LOW_CONF if avg_conf <= 1 else LOW_CONF * 100)
+    if not conf_ok:
+        return False
+    core = text.strip()
+    for j in sorted(_JOSA, key=len, reverse=True):
+        if core.endswith(j) and len(core) - len(j) >= 2:
+            core = core[:-len(j)]
+            break
+    if ptype == "NAME":
+        if core in _NER_STOP:
+            return False
+        # 한국 인명: 한글 2~4자, 거의 전부 한글
+        hangul = len(_HANGUL.findall(core))
+        return 2 <= len(core) <= 4 and hangul >= len(core) - 0
+    if ptype == "ADDR":
+        # 주소: 한글이 다수이고 일정 길이 이상
+        return len(core) >= 4 and len(_HANGUL.findall(core)) >= 3
+    return False
+
+
 def _union(tokens):
     """토큰 목록의 통합 바운딩 박스와 최소 신뢰도, 텍스트."""
     x0 = min(t[X0] for t in tokens)
@@ -77,10 +113,12 @@ def _union(tokens):
 
 
 class Masker:
-    def __init__(self, parties_path=None, mapping_path=None, ocr_engine="tesseract"):
+    def __init__(self, parties_path=None, mapping_path=None, ocr_engine="tesseract",
+                 ner=None):
         self.parties = _load_parties(parties_path)
         self.pseudo = Pseudonymizer(mapping_path)
         self.ocr_engine = ocr_engine
+        self.ner = ner  # KoreanNER 인스턴스 또는 None
         self._reader = None  # EasyOCR 지연 초기화
         self.audit: list[AuditItem] = []
         # 시드 식별값을 라벨에 고정 등록(여러 문서에서 일관)
@@ -102,9 +140,11 @@ class Masker:
     def _find_party_boxes(self, all_chars):
         """페이지 전체 글자 흐름에서 시드 이름을 찾는다.
 
-        all_chars: [token, ...] (읽기 순서, 글자 단위). despaced 인덱스 = 토큰 인덱스.
+        all_chars: [token, ...] (읽기 순서, 공백 포함). 매칭은 공백 제거본에서 수행.
         """
-        despaced = "".join(t[CH] for t in all_chars)
+        # 공백 제거본 + (despaced 인덱스 → all_chars 토큰 인덱스) 매핑
+        d2t = [i for i, t in enumerate(all_chars) if not t[CH].isspace()]
+        despaced = "".join(all_chars[i][CH] for i in d2t)
         N = len(despaced)
 
         keys = []
@@ -141,7 +181,7 @@ class Masker:
                     e = i + w
                     if e > N:
                         break
-                    if len({all_chars[j][LINE] for j in range(i, e)}) != 1:
+                    if len({all_chars[d2t[j]][LINE] for j in range(i, e)}) != 1:
                         continue
                     r = SequenceMatcher(None, despaced[i:e], key).ratio()
                     if r >= thr and (best is None or r > best[0]):
@@ -155,12 +195,13 @@ class Masker:
                 else:
                     i += 1
 
-        # 매칭 구간 → 줄별 박스
+        # 매칭 구간 → 줄별 박스 (despaced 인덱스를 토큰 인덱스로 환원)
         results = []
         for s, e, label in found:
             by_line = {}
             for j in range(s, e):
-                by_line.setdefault(all_chars[j][LINE], []).append(all_chars[j])
+                tok = all_chars[d2t[j]]
+                by_line.setdefault(tok[LINE], []).append(tok)
             for toks in by_line.values():
                 bbox, conf, txt = _union(toks)
                 results.append((label, bbox, conf, txt))
@@ -212,22 +253,43 @@ class Masker:
                 for t in toks:
                     all_chars.append((*t, li))
 
+            drawn = []  # 이 페이지에 이미 그린 박스들(중복/충돌 방지)
+
+            def apply(ptype, label, bbox, conf, txt):
+                self._redact(draw, bbox, label)
+                drawn.append(bbox)
+                self._log(pno, ptype, label, txt, conf, bbox)
+
             # 1) 정형 개인정보: 줄 단위(글자=인덱스이므로 구간이 곧 토큰 범위)
-            for li, toks in enumerate(lines):
+            for toks in lines:
                 line_text = "".join(t[CH] for t in toks)
                 for sp in detect_structured(line_text):
                     seg = toks[sp.start:sp.end]
                     if not seg:
                         continue
                     bbox, conf, txt = _union(seg)
-                    label = self.pseudo.label_for(sp.ptype, sp.value)
-                    self._redact(draw, bbox, label)
-                    self._log(pno, sp.ptype, label, txt, conf, bbox)
+                    apply(sp.ptype, self.pseudo.label_for(sp.ptype, sp.value),
+                          bbox, conf, txt)
 
             # 2) 시드 이름/법인: 페이지 전체 매칭(줄바꿈·OCR오류 대응)
             for label, bbox, conf, txt in self._find_party_boxes(all_chars):
-                self._redact(draw, bbox, label)
-                self._log(pno, "NAME", label, txt, conf, bbox)
+                apply("NAME", label, bbox, conf, txt)
+
+            # 3) NER 보조 탐지: 시드에 없는 제3자 이름(PS)·주소(LC)
+            #    이미 가려진 영역과 겹치면 건너뛴다(시드 라벨을 덮어쓰지 않도록).
+            #    노이즈 OCR의 과마스킹을 막기 위해 보수적으로 필터링한다.
+            if self.ner:
+                for toks in lines:
+                    line_text = "".join(t[CH] for t in toks)
+                    for ptype, s, e, etext in self.ner.entities(line_text):
+                        seg = toks[s:e]
+                        if not seg or not _ner_keep(ptype, etext, seg):
+                            continue
+                        bbox, conf, _ = _union(seg)
+                        if any(_overlap(bbox, b) for b in drawn):
+                            continue
+                        apply(ptype, self.pseudo.label_for(ptype, _norm(etext)),
+                              bbox, conf, etext)
 
             out_images.append(img)
 
@@ -261,8 +323,17 @@ if __name__ == "__main__":
     ap.add_argument("--mapping", help="가명 대응표 저장 경로")
     ap.add_argument("--audit", help="감사 리포트 저장 경로")
     ap.add_argument("--engine", choices=["tesseract", "easyocr"], default="tesseract")
+    ap.add_argument("--ner", action="store_true", help="한글 NER로 제3자 이름·주소 보조 탐지")
+    ap.add_argument("--ner-backend", choices=["spacy", "transformers"], default="spacy")
+    ap.add_argument("--ner-model", default="ko_core_news_sm",
+                    help="spaCy 모델명 또는 (transformers) 로컬 모델 경로")
     args = ap.parse_args()
+    ner = None
+    if args.ner:
+        from ner import KoreanNER
+        ner = KoreanNER(backend=args.ner_backend, model=args.ner_model)
     m = Masker(parties_path=args.parties, mapping_path=args.mapping,
-               ocr_engine=args.engine)
+               ocr_engine=args.engine, ner=ner)
     items = m.process(args.input, args.output, audit_path=args.audit)
-    print(f"마스킹 완료: {len(items)}건 → {args.output} (engine={args.engine})")
+    print(f"마스킹 완료: {len(items)}건 → {args.output} "
+          f"(engine={args.engine}, ner={'on' if ner else 'off'})")
