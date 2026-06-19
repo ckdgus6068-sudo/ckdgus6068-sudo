@@ -43,36 +43,43 @@ def _strip_org_josa(name):
     return name
 
 
+def _grab(tokens):
+    """토큰을 순서대로 병합해 회사명 복원(OCR이 글자마다 띄운 경우 대응).
+    비한글/숫자/불용어를 만나거나 누적 6자를 넘으면 중단."""
+    parts, acc = [], 0
+    for w in tokens:
+        w2 = re.sub(r"[^가-힣A-Za-z0-9]", "", w)
+        # 비한글/숫자 또는 '2글자 이상' 불용어면 중단(한 글자 조각은 이름의 일부일 수 있음)
+        if not w2 or re.search(r"\d", w2) or not re.search(r"[가-힣]", w2):
+            break
+        if len(w2) >= 2 and w2 in ORG_STOP:
+            break
+        parts.append(w2)
+        acc += len(w2)
+        if acc >= 6:
+            break
+    return parts
+
+
 def _extract_orgs(raw):
-    """한 줄에서 법인/회사명을 추출(접두/접미형 구분, 문법어 제외)."""
+    """한 줄에서 법인/회사명을 추출(접두/접미형 구분, 조각·숫자·문법어 제외)."""
     out = []
     for m in re.finditer(r"주식회사", raw):
-        after = raw[m.end():].lstrip()
-        before = raw[:m.start()].rstrip()
-        am = re.match(r"[가-힣A-Za-z0-9]{2,10}", after)
-        if am:  # 접두형: '주식회사 OOO' → 뒤 이름 사용
-            nm = _strip_org_josa(am.group(0))
-            if nm and nm not in ORG_STOP:
-                out.append("주식회사 " + nm)
-        else:   # 접미형: 'OOO 주식회사' → 앞 1~2어절 사용(문법어 제외)
-            toks = re.findall(r"[가-힣A-Za-z0-9]+", before)
-            picked = []
-            for w in reversed(toks[-2:]):
-                if w in ORG_STOP:
-                    break
-                picked.insert(0, w)
-            if picked:
-                out.append(" ".join(picked) + " 주식회사")
+        after = raw[m.end():].split()
+        before = raw[:m.start()].split()
+        nm_after = "".join(_grab(after))           # 접두형: 주식회사 OOO
+        if len(nm_after) >= 2:
+            out.append("주식회사 " + nm_after)
+        else:                                       # 접미형: OOO 주식회사
+            nm_before = "".join(reversed(_grab(list(reversed(before)))))
+            if len(nm_before) >= 2:
+                out.append(nm_before + " 주식회사")
     for m in re.finditer(r"법무법인\s*([가-힣]{2,10})", raw):
         out.append("법무법인 " + m.group(1))
     for m in re.finditer(r"([가-힣]{2,8})은행", raw):
         nm = m.group(1)
         if nm not in ORG_STOP:
             out.append(nm + "은행")
-    for m in re.finditer(r"([가-힣A-Za-z0-9]{2,16})\s*제\s*(\d+)\s*호", raw):
-        nm = m.group(1)
-        if nm not in ORG_STOP:
-            out.append(nm + "제" + m.group(2) + "호")
     return out
 # 역할 라벨 순서(보고서 가독성)
 ROLE_ORDER = ["피의자", "고소인측", "고소외", "참고인", "대리인", "회사대표",
