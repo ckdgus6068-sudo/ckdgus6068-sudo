@@ -153,12 +153,15 @@ def _union(tokens):
 
 class Masker:
     def __init__(self, parties_path=None, mapping_path=None, ocr_engine="tesseract",
-                 ner=None, paddle_model_dir=None):
+                 ner=None, paddle_model_dir=None, render_scale=None, canvas_size=None):
         self.parties = _load_parties(parties_path)
         self.pseudo = Pseudonymizer(mapping_path)
         self.ocr_engine = ocr_engine
         self.ner = ner  # KoreanNER 인스턴스 또는 None
         self.paddle_model_dir = paddle_model_dir  # 오프라인 로컬 모델 경로
+        # OCR 정밀도(클수록 정확·느림·메모리↑). None이면 환경변수/기본값 사용
+        self.render_scale = float(render_scale) if render_scale else RENDER_SCALE
+        self.canvas_size = canvas_size or os.environ.get("EASYOCR_CANVAS_SIZE", "1600")
         self._reader = None  # OCR 엔진 지연 초기화
         self.audit: list[AuditItem] = []
         # 시드 식별값을 라벨에 고정 등록(여러 문서에서 일관)
@@ -184,8 +187,7 @@ class Masker:
                     kw["download_enabled"] = False
                 self._reader = easyocr.Reader(["ko", "en"], **kw)
             # 메모리 절약: 내부 처리 이미지 크기 제한(기본 1600). 폭탄 할당 방지
-            canvas = os.environ.get("EASYOCR_CANVAS_SIZE", "1600")
-            return ocr_backends.easyocr_lines(img, self._reader, canvas_size=canvas)
+            return ocr_backends.easyocr_lines(img, self._reader, canvas_size=self.canvas_size)
         if self.ocr_engine == "paddleocr":
             if self._reader is None:
                 from paddleocr import PaddleOCR
@@ -309,28 +311,33 @@ class Masker:
                   label, fill="white", font=font)
 
     # --- 메인 ------------------------------------------------------------
-    def suggest_parties(self, in_pdf):
+    def suggest_parties(self, in_pdf, progress=None):
         """문서를 OCR해 마스킹 후보 명단 초안 + 검토 리포트를 만든다.
 
+        progress(done, total): 페이지 진행 콜백(선택).
         반환: (parties_list, report_text). 결과는 사람이 검토·수정해야 한다.
         """
         import suggest as _sg
         doc = fitz.open(in_pdf)
+        total = len(doc)
         line_texts = []
-        for page in doc:
-            pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_SCALE, RENDER_SCALE))
+        for pno, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=fitz.Matrix(self.render_scale, self.render_scale))
             img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
             for toks in self._ocr_lines(img):
                 line_texts.append("".join(t[CH] for t in toks))
             del pix, img
             gc.collect()  # 페이지마다 OCR 중간 메모리 회수(저사양 대응)
+            if progress:
+                progress(pno + 1, total)
         return _sg.build_draft(_sg.suggest(line_texts))
 
-    def process(self, in_pdf, out_pdf, audit_path=None):
+    def process(self, in_pdf, out_pdf, audit_path=None, progress=None):
         doc = fitz.open(in_pdf)
+        total = len(doc)
         out_images = []
         for pno, page in enumerate(doc):
-            pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_SCALE, RENDER_SCALE))
+            pix = page.get_pixmap(matrix=fitz.Matrix(self.render_scale, self.render_scale))
             img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
             draw = ImageDraw.Draw(img)
 
@@ -381,6 +388,8 @@ class Masker:
             out_images.append(img)
             del pix
             gc.collect()  # 페이지마다 OCR 중간 메모리 회수(저사양 대응)
+            if progress:
+                progress(pno + 1, total)
 
         out_images[0].save(out_pdf, save_all=True, append_images=out_images[1:])
         self.pseudo.save()

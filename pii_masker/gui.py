@@ -16,6 +16,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 ENGINES = ["tesseract", "easyocr", "paddleocr"]
+# OCR 정밀도 프리셋 → (render_scale, canvas_size)
+PRECISION = {
+    "빠름(저메모리)": (1.5, 1024),
+    "보통": (2.0, 1600),
+    "정밀(느림)": (3.0, 2560),
+}
 
 
 class App:
@@ -121,9 +127,12 @@ class App:
     def _draft_worker(self):
         try:
             from masker import Masker
-            m = Masker(ocr_engine=self.engine.get())
-            self._logmsg(f"명단 초안 분석 중 (engine={self.engine.get()}, OCR) ...")
-            parties, report = m.suggest_parties(self.files[0])
+            scale, canvas = self._ocr_params()
+            m = Masker(ocr_engine=self.engine.get(), render_scale=scale, canvas_size=canvas)
+            self._logmsg(f"명단 초안 분석 중 (engine={self.engine.get()}, 정밀도={self.precision.get()}) ...")
+            parties, report = m.suggest_parties(
+                self.files[0],
+                progress=lambda d, t: self._logmsg(f"  분석 {d}/{t} 페이지..."))
             self._logmsg(report)
             self.root.after(0, lambda: self._load_draft(parties))
         except Exception as e:
@@ -159,15 +168,24 @@ class App:
         self.use_ner = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="NER 보조 탐지(제3자 이름·주소 / 과마스킹 주의)",
                         variable=self.use_ner).grid(row=0, column=2, padx=12, sticky="w")
-        ttk.Label(f, text="출력 폴더").grid(row=1, column=0, padx=6, pady=4, sticky="w")
+        ttk.Label(f, text="OCR 정밀도").grid(row=1, column=0, padx=6, pady=4, sticky="w")
+        self.precision = tk.StringVar(value="보통")
+        ttk.OptionMenu(f, self.precision, "보통", *PRECISION.keys()).grid(row=1, column=1, sticky="w")
+        ttk.Label(f, text="(정밀=정확↑·느림·메모리↑ / 빠름=저메모리)").grid(
+            row=1, column=2, columnspan=2, sticky="w")
+        ttk.Label(f, text="출력 폴더").grid(row=2, column=0, padx=6, pady=4, sticky="w")
         self.outdir = tk.StringVar()
-        ttk.Entry(f, textvariable=self.outdir, width=50).grid(row=1, column=1, columnspan=2, sticky="w")
-        ttk.Button(f, text="선택", command=self.pick_outdir).grid(row=1, column=3, padx=4)
+        ttk.Entry(f, textvariable=self.outdir, width=50).grid(row=2, column=1, columnspan=2, sticky="w")
+        ttk.Button(f, text="선택", command=self.pick_outdir).grid(row=2, column=3, padx=4)
 
     def pick_outdir(self):
         d = filedialog.askdirectory()
         if d:
             self.outdir.set(d)
+
+    def _ocr_params(self):
+        """선택된 정밀도 → (render_scale, canvas_size)."""
+        return PRECISION[self.precision.get()]
 
     # --- 4. 실행 --------------------------------------------------------
     def _build_run(self, root):
@@ -216,16 +234,20 @@ class App:
             parties_path.write_text(json.dumps({"parties": self.parties},
                                     ensure_ascii=False, indent=2), encoding="utf-8")
             mapping_path = outdir / "mapping.json"
+            scale, canvas = self._ocr_params()
             # 여러 파일에 걸쳐 가명을 일관 유지하려면 Masker를 한 번 만들어 재사용
             masker = Masker(parties_path=str(parties_path), mapping_path=str(mapping_path),
-                            ocr_engine=self.engine.get(), ner=ner)
+                            ocr_engine=self.engine.get(), ner=ner,
+                            render_scale=scale, canvas_size=canvas)
             for f in self.files:
                 name = Path(f).stem
                 out_pdf = outdir / f"{name}_masked.pdf"
                 audit = outdir / f"{name}_audit.json"
-                self._logmsg(f"처리 중: {Path(f).name} (engine={self.engine.get()}) ...")
+                self._logmsg(f"처리 중: {Path(f).name} (engine={self.engine.get()}, 정밀도={self.precision.get()}) ...")
                 masker.audit = []
-                items = masker.process(f, str(out_pdf), audit_path=str(audit))
+                items = masker.process(
+                    f, str(out_pdf), audit_path=str(audit),
+                    progress=lambda d, t: self._logmsg(f"  {d}/{t} 페이지..."))
                 low = sum(1 for a in items if a.conf < (0.6 if a.conf <= 1 else 60))
                 self._logmsg(f"  완료: {len(items)}건 마스킹 (저신뢰 {low}건) → {out_pdf.name}")
             self._logmsg("모든 작업 완료. 가명 대응표: mapping.json")
