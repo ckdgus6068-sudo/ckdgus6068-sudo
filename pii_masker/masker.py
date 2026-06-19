@@ -13,6 +13,7 @@ import json
 import os
 import re
 import sys
+import gc
 from dataclasses import dataclass, asdict, field
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -171,6 +172,11 @@ class Masker:
         if self.ocr_engine == "easyocr":
             if self._reader is None:
                 import easyocr
+                try:  # 메모리 절약: torch 스레드 수 제한(병렬 버퍼 감소)
+                    import torch
+                    torch.set_num_threads(max(1, int(os.environ.get("TORCH_THREADS", "1"))))
+                except Exception:
+                    pass
                 kw = dict(gpu=False, verbose=False)
                 mdir = _easyocr_model_dir()
                 if mdir:  # 오프라인: 동봉 모델 사용 + 다운로드 금지
@@ -316,6 +322,8 @@ class Masker:
             img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
             for toks in self._ocr_lines(img):
                 line_texts.append("".join(t[CH] for t in toks))
+            del pix, img
+            gc.collect()  # 페이지마다 OCR 중간 메모리 회수(저사양 대응)
         return _sg.build_draft(_sg.suggest(line_texts))
 
     def process(self, in_pdf, out_pdf, audit_path=None):
@@ -371,6 +379,8 @@ class Masker:
                               bbox, conf, etext)
 
             out_images.append(img)
+            del pix
+            gc.collect()  # 페이지마다 OCR 중간 메모리 회수(저사양 대응)
 
         out_images[0].save(out_pdf, save_all=True, append_images=out_images[1:])
         self.pseudo.save()
