@@ -122,7 +122,7 @@ def suggest(line_texts):
             persons[name]["role"] = _better_role(persons[name]["role"], role)
         else:
             persons[name] = {"role": role, "count": 1, "order": len(persons),
-                             "sample": sample.strip()[:60]}
+                             "sample": sample.strip()[:60], "variants": [name]}
 
     for raw in line_texts:
         # 인물: 강한 문맥 단서 규칙(이름의 글자 사이 공백은 캡처 후 제거)
@@ -135,7 +135,7 @@ def suggest(line_texts):
             if org in orgs:
                 orgs[org]["count"] += 1
             else:
-                orgs[org] = {"count": 1, "sample": raw.strip()[:60]}
+                orgs[org] = {"count": 1, "sample": raw.strip()[:60], "variants": [org]}
 
     return {"persons": persons, "orgs": orgs}
 
@@ -155,10 +155,16 @@ def _merge_similar(d, thr):
                 break
         if match:
             d[match]["count"] += d[n]["count"]
+            d[match].setdefault("variants", [match]).extend(d[n].get("variants", [n]))
             d.pop(n, None)
         else:
             kept.append(n)
     return d
+
+
+def _names_of(info, fallback):
+    """후보의 모든 OCR 변형(중복 제거). 마스킹이 어떤 철자든 잡도록."""
+    return list(dict.fromkeys(info.get("variants", [fallback])))
 
 
 def build_draft(found):
@@ -181,8 +187,10 @@ def build_draft(found):
         role = info["role"]
         counters[role] = counters.get(role, 0) + 1
         label = f"{role}{counters[role]}"
-        parties.append({"label": label, "names": [name], "ids": []})
-        report.append(f"  {label}\t← {name}  (등장 {info['count']}회)  예: {info['sample']}")
+        names = _names_of(info, name)
+        parties.append({"label": label, "names": names, "ids": []})
+        extra = f" (+변형 {len(names)})" if len(names) > 1 else ""
+        report.append(f"  {label}\t← {name}{extra}  (등장 {info['count']}회)  예: {info['sample']}")
 
     # 법인: 회사N / 법무법인N / 은행N
     report.append("")
@@ -197,8 +205,10 @@ def build_draft(found):
             kind = "회사"
         org_counters[kind] = org_counters.get(kind, 0) + 1
         label = f"{kind}{org_counters[kind]}"
-        parties.append({"label": label, "names": [org], "ids": []})
-        report.append(f"  {label}\t← {org}  (등장 {info['count']}회)")
+        names = _names_of(info, org)
+        parties.append({"label": label, "names": names, "ids": []})
+        extra = f"  [변형: {', '.join(names)}]" if len(names) > 1 else ""
+        report.append(f"  {label}\t← {org}  (등장 {info['count']}회){extra}")
 
     report += ["", "※ 주민번호·전화·계좌 등 정형정보는 명단 없이 자동 마스킹됩니다.",
                "※ 역할(피의자/참고인 등)은 추정값입니다. 라벨을 직접 확인·수정하세요."]
