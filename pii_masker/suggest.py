@@ -6,6 +6,7 @@ OCR이 부정확하면 오탐·누락이 있을 수 있으므로 결과는 반�
 """
 import re
 from collections import OrderedDict
+from difflib import SequenceMatcher
 
 # 한국 인명: 2~3자, 글자 사이 공백 허용("여 인 석")
 NAME = r"[가-힣](?:\s?[가-힣]){1,2}"
@@ -39,6 +40,7 @@ ORG_STOP = {
     "대표이사", "대표", "이사", "사장", "회장", "부장", "과장", "팀장", "변호사",
     "대주주", "주주", "관계사", "관계회사", "매도인", "매수인", "시행자", "시공사",
     "보증인", "연대보증인", "용역사", "당사자", "명의", "계좌", "지인",
+    "채무자", "채권자", "고소인", "피고소인", "신청인", "피신청인",
 }
 ORG_JOSA = ("으로부터", "로부터", "으로서", "으로써", "으로", "에서", "에게", "로써",
             "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "로")
@@ -75,11 +77,11 @@ def _extract_orgs(raw):
     for m in re.finditer(r"주식회사", raw):
         after = raw[m.end():].split()
         before = raw[:m.start()].split()
-        nm_after = "".join(_grab(after))           # 접두형: 주식회사 OOO
+        nm_after = _strip_org_josa("".join(_grab(after)))   # 접두형: 주식회사 OOO
         if len(nm_after) >= 2:
             out.append("주식회사 " + nm_after)
-        else:                                       # 접미형: OOO 주식회사
-            nm_before = "".join(reversed(_grab(list(reversed(before)))))
+        else:                                               # 접미형: OOO 주식회사
+            nm_before = _strip_org_josa("".join(reversed(_grab(list(reversed(before))))))
             if len(nm_before) >= 2:
                 out.append(nm_before + " 주식회사")
     for m in re.finditer(r"법무법인\s*([가-힣]{2,10})", raw):
@@ -138,20 +140,36 @@ def suggest(line_texts):
     return {"persons": persons, "orgs": orgs}
 
 
+def _merge_similar(d, thr):
+    """OCR 변형(와이핸플래님/와이엔플래님, 양헌/양히 등)이나 포함관계인 후보를
+    하나로 합친다. 등장 빈도가 높은(또는 더 긴) 쪽을 대표로 삼고 횟수를 합산."""
+    names = sorted(d, key=lambda n: (-d[n]["count"], -len(n)))
+    kept = []
+    for n in names:
+        nn = re.sub(r"\s+", "", n)
+        match = None
+        for k in kept:
+            kk = re.sub(r"\s+", "", k)
+            if nn in kk or kk in nn or SequenceMatcher(None, nn, kk).ratio() >= thr:
+                match = k
+                break
+        if match:
+            d[match]["count"] += d[n]["count"]
+            d.pop(n, None)
+        else:
+            kept.append(n)
+    return d
+
+
 def build_draft(found):
     """suggest() 결과 → (parties 리스트, 사람이 읽을 검토 리포트 문자열)."""
     persons, orgs = found["persons"], found["orgs"]
     parties = []
     report = ["=== 마스킹 후보 검토 초안 (반드시 확인·수정하세요) ===", ""]
 
-    # 더 긴 이름의 일부인 조각 제거(줄바꿈으로 잘린 '여인'←'여인석' 등)
-    names = list(persons)
-    for a in names:
-        for b in names:
-            if a != b and a in b and len(a) < len(b) and a in persons:
-                persons[b]["count"] += persons[a]["count"]
-                persons.pop(a, None)
-                break
+    # OCR 변형/조각을 하나로 병합(인물은 보수적으로, 회사는 약간 느슨하게)
+    _merge_similar(persons, 0.85)
+    _merge_similar(orgs, 0.75)
 
     # 인물: 역할별 번호 매기기
     counters = {}
