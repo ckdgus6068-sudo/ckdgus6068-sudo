@@ -26,13 +26,54 @@ STOP = {
     "주식회사", "법무법인", "대표이사", "사업부지", "투자금", "수사기관",
     "고소장", "의견서", "본건", "당시", "이하", "관련", "해당", "지인",
 }
-ORG_PATTERNS = [
-    re.compile(r"주식회사\s*[가-힣A-Za-z0-9]{2,20}"),
-    re.compile(r"[가-힣A-Za-z0-9]{2,20}\s*주식회사"),
-    re.compile(r"법무법인\s*[가-힣]{2,10}"),
-    re.compile(r"[가-힣]{2,8}은행"),
-    re.compile(r"[가-힣A-Za-z0-9]{2,16}제\s*\d+\s*호"),
-]
+# 회사명 추출용 — 문법어/조사(오탐 방지)
+ORG_STOP = {
+    "로서", "있는", "하는", "되는", "같은", "위한", "통한", "따른", "대한", "관한",
+    "관련", "의한", "라는", "에서", "으로", "로써", "그", "이", "본", "위", "및",
+    "또는", "당시", "라고", "함은", "함을", "지난", "당사", "해당", "각각",
+}
+ORG_JOSA = ("으로부터", "로부터", "으로서", "으로써", "으로", "에서", "에게", "로써",
+            "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도", "로")
+
+
+def _strip_org_josa(name):
+    for j in sorted(ORG_JOSA, key=len, reverse=True):
+        if len(name) - len(j) >= 2 and name.endswith(j):
+            return name[:-len(j)]
+    return name
+
+
+def _extract_orgs(raw):
+    """한 줄에서 법인/회사명을 추출(접두/접미형 구분, 문법어 제외)."""
+    out = []
+    for m in re.finditer(r"주식회사", raw):
+        after = raw[m.end():].lstrip()
+        before = raw[:m.start()].rstrip()
+        am = re.match(r"[가-힣A-Za-z0-9]{2,10}", after)
+        if am:  # 접두형: '주식회사 OOO' → 뒤 이름 사용
+            nm = _strip_org_josa(am.group(0))
+            if nm and nm not in ORG_STOP:
+                out.append("주식회사 " + nm)
+        else:   # 접미형: 'OOO 주식회사' → 앞 1~2어절 사용(문법어 제외)
+            toks = re.findall(r"[가-힣A-Za-z0-9]+", before)
+            picked = []
+            for w in reversed(toks[-2:]):
+                if w in ORG_STOP:
+                    break
+                picked.insert(0, w)
+            if picked:
+                out.append(" ".join(picked) + " 주식회사")
+    for m in re.finditer(r"법무법인\s*([가-힣]{2,10})", raw):
+        out.append("법무법인 " + m.group(1))
+    for m in re.finditer(r"([가-힣]{2,8})은행", raw):
+        nm = m.group(1)
+        if nm not in ORG_STOP:
+            out.append(nm + "은행")
+    for m in re.finditer(r"([가-힣A-Za-z0-9]{2,16})\s*제\s*(\d+)\s*호", raw):
+        nm = m.group(1)
+        if nm not in ORG_STOP:
+            out.append(nm + "제" + m.group(2) + "호")
+    return out
 # 역할 라벨 순서(보고서 가독성)
 ROLE_ORDER = ["피의자", "고소인측", "고소외", "참고인", "대리인", "회사대표",
               "관계인", "수사관계인", "인물"]
@@ -71,14 +112,13 @@ def suggest(line_texts):
         for pat, role in PERSON_RULES:
             for m in re.finditer(pat, raw):
                 add_person(m.group(1), role, raw)
-        # 법인 패턴
-        for pat in ORG_PATTERNS:
-            for m in pat.finditer(raw):
-                org = re.sub(r"\s+", " ", m.group(0)).strip()
-                if org in orgs:
-                    orgs[org]["count"] += 1
-                else:
-                    orgs[org] = {"count": 1, "sample": raw.strip()[:60]}
+        # 법인/회사명(접두·접미 구분, 문법어 제외)
+        for org in _extract_orgs(raw):
+            org = re.sub(r"\s+", " ", org).strip()
+            if org in orgs:
+                orgs[org]["count"] += 1
+            else:
+                orgs[org] = {"count": 1, "sample": raw.strip()[:60]}
 
     return {"persons": persons, "orgs": orgs}
 
