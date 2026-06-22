@@ -94,6 +94,18 @@ def easyocr_lines(img, reader, canvas_size=None):
     return out
 
 
+def _pp_field(r, key, *alts):
+    """PaddleOCR 결과(dict 유사 객체)에서 키를 안전하게 꺼낸다."""
+    for k in (key, *alts):
+        try:
+            v = r[k]
+        except Exception:
+            v = getattr(r, k, None)
+        if v is not None:
+            return v
+    return None
+
+
 def paddleocr_lines(img, ocr):
     """PaddleOCR(3.x): 인식 세그먼트 1개 = 1줄, 글자 단위로 비례 분할.
 
@@ -106,9 +118,9 @@ def paddleocr_lines(img, ocr):
     if not res:
         return []
     r = res[0]
-    texts = r["rec_texts"]
-    polys = r.get("rec_polys", r.get("dt_polys"))
-    scores = r["rec_scores"]
+    texts = _pp_field(r, "rec_texts") or []
+    polys = _pp_field(r, "rec_polys", "dt_polys") or []
+    scores = _pp_field(r, "rec_scores") or [1.0] * len(texts)
     out = []
     for text, poly, score in zip(texts, polys, scores):
         xs = [float(p[0]) for p in poly]

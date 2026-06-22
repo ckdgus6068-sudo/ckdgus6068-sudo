@@ -163,8 +163,11 @@ class App:
         f = ttk.LabelFrame(root, text="3. 옵션")
         f.pack(fill="x", padx=10, pady=6)
         ttk.Label(f, text="OCR 엔진").grid(row=0, column=0, padx=6, pady=4, sticky="w")
-        self.engine = tk.StringVar(value="tesseract")
-        ttk.OptionMenu(f, self.engine, "tesseract", *ENGINES).grid(row=0, column=1, sticky="w")
+        default_engine = os.environ.get("PII_DEFAULT_ENGINE", "tesseract")
+        if default_engine not in ENGINES:
+            default_engine = "tesseract"
+        self.engine = tk.StringVar(value=default_engine)
+        ttk.OptionMenu(f, self.engine, default_engine, *ENGINES).grid(row=0, column=1, sticky="w")
         self.use_ner = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="NER 보조 탐지(제3자 이름·주소 / 과마스킹 주의)",
                         variable=self.use_ner).grid(row=0, column=2, padx=12, sticky="w")
