@@ -1,0 +1,19 @@
+# 공통(필수)
+pymupdf>=1.24
+pillow>=10
+
+# OCR 엔진 — 사용할 엔진의 것만 설치
+# tesseract: 별도 설치 필요(Windows: UB Mannheim 인스톨러, 한국어 데이터 포함)
+pytesseract>=0.3.10
+# easyocr (torch 동반, 용량 큼)
+# easyocr>=1.7
+# paddleocr (오프라인 배포 권장)
+# paddlepaddle>=3.0
+# paddleocr>=3.0
+
+# NER(선택) — 기본 OFF
+# spacy>=3.7            # + ko_core_news_sm
+# transformers>=4.40    # + 로컬 KoELECTRA(MODU-NER) 모델
+
+# 빌드
+# pyinstaller>=6.0
