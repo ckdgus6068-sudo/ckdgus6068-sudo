@@ -16,6 +16,7 @@ REM  Image size: smaller = less memory, larger = more accurate.
 set "PII_RENDER_SCALE=1.5"
 set "EASYOCR_CANVAS_SIZE=1024"
 set "PII_DEFAULT_ENGINE=easyocr"
+set "KMP_DUPLICATE_LIB_OK=TRUE"
 
 echo Starting program (EasyOCR, threads=%OMP_NUM_THREADS%)...
 echo TIP: close Chrome / Acrobat / other apps before masking.

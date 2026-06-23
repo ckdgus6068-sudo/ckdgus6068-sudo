@@ -31,6 +31,7 @@ set "OMP_NUM_THREADS=2"
 set "PII_RENDER_SCALE=2.0"
 set "EASYOCR_CANVAS_SIZE=1280"
 set "PII_DEFAULT_ENGINE=easyocr"
+set "KMP_DUPLICATE_LIB_OK=TRUE"
 
 echo Starting program (offline, EasyOCR using bundled models)...
 python gui.py
