@@ -17,10 +17,13 @@ from tkinter import filedialog, messagebox, ttk
 
 ENGINES = ["tesseract", "easyocr", "paddleocr"]
 # OCR 정밀도 프리셋 → (render_scale, canvas_size)
+#  render_scale = 인식 선명도(높을수록 정확, 메모리 영향 작음)
+#  canvas_size  = 검출 처리크기(높을수록 메모리↑) — 메모리 안전을 위해 묶어둠
 PRECISION = {
     "빠름(저메모리)": (1.5, 1024),
-    "보통": (2.0, 1600),
-    "정밀(느림)": (3.0, 2560),
+    "보통": (2.0, 1280),
+    "정밀": (3.0, 1536),          # 선명도↑(3.0) + 검출크기는 보통 수준으로 제한 → 저메모리 정밀
+    "최고정밀(메모리 여유 시)": (3.5, 2048),
 }
 
 
