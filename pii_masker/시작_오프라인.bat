@@ -2,7 +2,7 @@
 REM ============================================================
 REM  Run this ON the internal (offline) PC. No internet needed.
 REM  Requires: Python installed (same version as on vmfort),
-REM            and offline\wheels + models\easyocr present (from 준비_오프라인.bat).
+REM            and offline\wheels + models\easyocr present (from the prepare batch).
 REM ============================================================
 cd /d "%~dp0"
 
