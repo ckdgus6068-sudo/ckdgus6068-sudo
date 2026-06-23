@@ -8,7 +8,7 @@ cd /d "%~dp0"
 
 if not exist "offline\wheels" (
   echo [!] offline\wheels folder not found.
-  echo     Run 준비_오프라인.bat on vmfort first, then copy the folder here.
+  echo     Run the prepare-offline batch on vmfort first, then copy the folder here.
   pause
   exit /b
 )
