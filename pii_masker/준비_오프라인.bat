@@ -7,7 +7,7 @@ REM ============================================================
 cd /d "%~dp0"
 
 echo [1/2] Downloading packages for offline install (torch included, can take minutes)...
-python -m pip download pymupdf pillow numpy easyocr -d offline\wheels
+py -3.14 -m pip download pymupdf pillow numpy easyocr -d offline\wheels
 
 echo.
 echo [2/2] Copying EasyOCR Korean models into models\easyocr ...

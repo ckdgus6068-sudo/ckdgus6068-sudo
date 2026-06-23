@@ -13,7 +13,13 @@ if not exist "offline\wheels" (
   exit /b
 )
 
-if not exist ".venv\Scripts\python.exe" python -m venv .venv
+py -3.14 --version >nul 2>&1 || (
+  echo [!] Python 3.14 not found. Install python-3.14.x-amd64.exe first.
+  pause
+  exit /b
+)
+
+if not exist ".venv\Scripts\python.exe" py -3.14 -m venv .venv
 call ".venv\Scripts\activate.bat"
 
 echo Installing packages from local wheels (no internet)...
