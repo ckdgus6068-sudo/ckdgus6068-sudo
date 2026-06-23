@@ -7,16 +7,19 @@ call ".venv\Scripts\activate.bat"
 echo Checking packages... (first time installs EasyOCR/torch, can take several minutes)
 pip install -q pymupdf pillow numpy easyocr
 
-REM ---- Low-memory settings for ~6GB RAM PCs ----
+REM ====== Speed vs memory knob ======
+REM  THREADS higher = FASTER but uses MORE memory.
+REM  If the program crashes/closes (out of memory), lower THREADS to 2 or 1.
+set "TORCH_THREADS=4"
+set "OMP_NUM_THREADS=4"
+REM  Image size: smaller = less memory, larger = more accurate.
 set "PII_RENDER_SCALE=1.5"
 set "EASYOCR_CANVAS_SIZE=1024"
-set "OMP_NUM_THREADS=1"
-set "TORCH_THREADS=1"
 
-echo Starting program (EasyOCR, low-memory mode)...
+echo Starting program (EasyOCR, threads=%OMP_NUM_THREADS%)...
 echo TIP: close Chrome / Acrobat / other apps before masking.
 python gui.py
 
 echo.
-echo (Program closed. If it crashed, lower EASYOCR_CANVAS_SIZE to 800 in this file.)
+echo (Program closed. If it crashed, lower TORCH_THREADS/OMP_NUM_THREADS to 2 in this file.)
 pause
