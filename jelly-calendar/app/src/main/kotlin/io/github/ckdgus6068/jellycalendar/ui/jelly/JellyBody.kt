@@ -11,7 +11,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -86,31 +86,50 @@ fun JellyBody(
                 transformOrigin = TransformOrigin(0.5f, 1f)
                 this.alpha = alpha
             }
-            .drawBehind {
-                val time = if (idle) clock.value else 0f
-                drawJelly(
-                    outline = outline,
-                    path = path,
-                    liquid = liquid,
-                    check = check,
-                    flavor = flavor,
-                    look = look,
-                    radius = radiusPx,
-                    unit = px,
-                    dash = dash,
-                    time = time,
-                    phase = motion?.phase ?: fallbackPhase,
-                    idleAmp = if (idle) 1.0f * px else 0f,
-                    wobble = motion?.wobble?.value ?: 0f,
-                    leanX = lean?.leanX ?: 0f,
-                    leanY = lean?.leanY ?: 0f,
-                    grabX = lean?.grabX ?: (size.width / 2f),
-                    grabY = lean?.grabY ?: (size.height / 2f),
-                    bottomPull = bottomPull?.invoke() ?: 0f,
-                    fill = motion?.fill?.value ?: 0f,
-                    wave = motion?.wave?.value ?: 0f,
-                    lift = motion?.lift?.value ?: 0f,
+            .drawWithCache {
+                // Colours and gradients only change with the size or the flavour: build them once.
+                val missed = look == JellyLook.MISSED
+                val deep = if (missed) desaturate(flavor.deep) else flavor.deep
+                val paint = JellyPaint(
+                    body = Brush.verticalGradient(
+                        listOf(
+                            if (missed) desaturate(flavor.light) else flavor.light,
+                            if (missed) desaturate(flavor.base) else flavor.base,
+                        ),
+                        startY = 0f,
+                        endY = size.height,
+                    ),
+                    juice = Brush.verticalGradient(listOf(deep.copy(alpha = 0.86f), deep), startY = 0f, endY = size.height),
+                    deep = deep,
+                    missed = missed,
                 )
+                onDrawBehind {
+                    val time = if (idle) clock.value else 0f
+                    drawJelly(
+                        outline = outline,
+                        path = path,
+                        liquid = liquid,
+                        check = check,
+                        flavor = flavor,
+                        paint = paint,
+                        ghost = look == JellyLook.GHOST,
+                        radius = radiusPx,
+                        unit = px,
+                        dash = dash,
+                        time = time,
+                        phase = motion?.phase ?: fallbackPhase,
+                        idleAmp = if (idle) 1.0f * px else 0f,
+                        wobble = motion?.wobble?.value ?: 0f,
+                        leanX = lean?.leanX ?: 0f,
+                        leanY = lean?.leanY ?: 0f,
+                        grabX = lean?.grabX ?: (size.width / 2f),
+                        grabY = lean?.grabY ?: (size.height / 2f),
+                        bottomPull = bottomPull?.invoke() ?: 0f,
+                        fill = motion?.fill?.value ?: 0f,
+                        wave = motion?.wave?.value ?: 0f,
+                        lift = motion?.lift?.value ?: 0f,
+                    )
+                }
             },
         content = content,
     )
@@ -118,13 +137,16 @@ fun JellyBody(
 
 private fun desaturate(color: Color): Color = lerp(color, Color(0xFFB9B4BC), 0.62f)
 
+private class JellyPaint(val body: Brush, val juice: Brush, val deep: Color, val missed: Boolean)
+
 private fun DrawScope.drawJelly(
     outline: JellyOutline,
     path: Path,
     liquid: Path,
     check: Path,
     flavor: JellyFlavor,
-    look: JellyLook,
+    paint: JellyPaint,
+    ghost: Boolean,
     radius: Float,
     unit: Float,
     dash: PathEffect,
@@ -149,22 +171,20 @@ private fun DrawScope.drawJelly(
     outline.deform(time, phase, idleAmp, wobble, wobbleAmp, leanX, leanY, grabX, grabY, bottomPull)
     outline.writeTo(path)
 
-    if (look == JellyLook.GHOST) {
+    if (ghost) {
         drawPath(path, flavor.base.copy(alpha = 0.16f))
         drawPath(path, flavor.deep.copy(alpha = 0.55f), style = Stroke(width = 1.3f * unit, pathEffect = dash))
         return
     }
-    val missed = look == JellyLook.MISSED
-    val light = if (missed) desaturate(flavor.light) else flavor.light
-    val base = if (missed) desaturate(flavor.base) else flavor.base
-    val deep = if (missed) desaturate(flavor.deep) else flavor.deep
+    val missed = paint.missed
+    val deep = paint.deep
 
     // Soft shadow under the jelly.
     translate(top = (1.5f + lift * 5f) * unit) {
         drawPath(path, Color.Black.copy(alpha = 0.09f + lift * 0.10f))
     }
     // Translucent body: lighter on top like light passing through.
-    drawPath(path, Brush.verticalGradient(listOf(light, base), startY = 0f, endY = h))
+    drawPath(path, paint.body)
 
     if (fill > 0.001f) {
         clipPath(path) {
@@ -181,10 +201,7 @@ private fun DrawScope.drawJelly(
             }
             liquid.lineTo(w + 4f * unit, h + 8f * unit)
             liquid.close()
-            drawPath(
-                liquid,
-                Brush.verticalGradient(listOf(deep.copy(alpha = 0.86f), deep), startY = level, endY = h),
-            )
+            drawPath(liquid, paint.juice)
         }
     }
 

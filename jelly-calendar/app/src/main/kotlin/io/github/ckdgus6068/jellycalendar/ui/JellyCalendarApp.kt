@@ -112,7 +112,8 @@ fun JellyCalendarApp(
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(today, weekStart) {
-        store.seedIfNeeded(::sampleRoutine)
+        // Start the sample tomorrow when this morning's run is already over.
+        store.seedIfNeeded { day, id -> sampleRoutine(if (nowMinute < 6 * 60) day else day.plusDays(1), id) }
         store.refresh(weekDays)
     }
 

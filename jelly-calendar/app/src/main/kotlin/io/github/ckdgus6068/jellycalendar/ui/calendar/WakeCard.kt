@@ -43,6 +43,7 @@ fun WakeCard(
     status: WakeStatus,
     gapMin: Int,
     source: String?,
+    requestedMin: Int?,
     onSetAlarm: (minute: Int, label: String) -> Unit,
     onMoveFirst: (Jelly, Int) -> Unit,
     onOpenAlarms: () -> Unit,
@@ -73,6 +74,9 @@ fun WakeCard(
             if (status.alarmPassed) {
                 title = "${hm(status.alarmMin)}에 일어났어요 · ${hm(start)} ${first.title}"
                 subtitle = "오늘 아침 알람은 이미 지나갔어요"
+            } else if (requestedMin == status.suggestedAlarm) {
+                title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
+                subtitle = "${hm(requestedMin)} 알람을 요청했어요. 예전 ${hm(status.alarmMin)} 알람은 시계 앱에서 꺼 주세요."
             } else {
                 title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
                 subtitle = "알람 뒤 ${start - status.alarmMin}분 만에 시작해요 (설정은 ${gapMin}분)"
@@ -90,7 +94,9 @@ fun WakeCard(
         is WakeStatus.NoAlarm -> {
             val first = status.first
             title = "첫 일과 ${hm(first.startMin ?: 0)} ${first.title}"
-            if (status.canSetNow) {
+            if (requestedMin == status.suggestedAlarm) {
+                subtitle = "${hm(requestedMin)} 알람을 요청했어요. 시계 앱에 저장됐는지 확인해 주세요."
+            } else if (status.canSetNow) {
                 subtitle = "기상 알람이 아직 없어요. ${gapMin}분 전에 깨워 드릴까요?"
                 actions += "알람 ${hm(status.suggestedAlarm)} 맞추기" to {
                     onSetAlarm(status.suggestedAlarm, "젤리 · ${first.title}")

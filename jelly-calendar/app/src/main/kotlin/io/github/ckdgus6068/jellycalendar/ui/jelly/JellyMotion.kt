@@ -16,6 +16,7 @@ import androidx.compose.runtime.withFrameNanos
 import kotlin.math.sqrt
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -161,15 +162,13 @@ fun rememberJellyClock(running: Boolean): State<Float> {
     LaunchedEffect(running) {
         if (!running) return@LaunchedEffect
         var origin = -1L
-        var last = 0L
         while (true) {
             withFrameNanos { now ->
                 if (origin < 0L) origin = now - (time.value * 1_000_000_000L).toLong()
-                if (now - last >= 33_000_000L) {
-                    last = now
-                    time.value = (now - origin) / 1_000_000_000f
-                }
+                time.value = (now - origin) / 1_000_000_000f
             }
+            // About 30 updates a second is plenty for slow breathing and spares the battery.
+            delay(28)
         }
     }
     return time

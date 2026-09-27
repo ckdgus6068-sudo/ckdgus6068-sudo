@@ -132,6 +132,7 @@ fun CalendarScreen(
                     status = status,
                     gapMin = data.settings.wakeGapMin,
                     source = data.wakeOn(selected)?.source,
+                    requestedMin = data.lastAlarmRequest?.takeIf { it.date == selected }?.minute,
                     onSetAlarm = { minute, label -> actions.setAlarm(selected, minute, label) },
                     onMoveFirst = { jelly, minute -> actions.moveFirst(jelly, selected, minute) },
                     onOpenAlarms = { actions.openAlarms() },
