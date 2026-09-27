@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- A small mint jelly peeking from behind. -->
+    <path
+        android:fillColor="#FF93E4C9"
+        android:pathData="M70,44 C79,44 84,47 84.5,56 C85,64 83,71 76,71.5 L70,71.5 Z" />
+
+    <!-- Strawberry jelly body. -->
+    <path
+        android:fillColor="#FFFF9DB4"
+        android:pathData="M54,31 C70,31 80,35.5 81,51.5 C82,66 80,78.5 66,79 L42,79 C28,78.5 26,66 27,51.5 C28,35.5 38,31 54,31 Z" />
+
+    <!-- Deeper colour pooled at the bottom. -->
+    <path
+        android:fillColor="#59EE4F78"
+        android:pathData="M27.3,60 C28,74 32,79 42,79 L66,79 C76,79 80.6,74 80.8,60 C72,66.5 36,66.5 27.3,60 Z" />
+
+    <!-- Gloss. -->
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M35.5,42 C35.5,38 47.5,36.5 50,39.5 C51.5,42.5 40.5,46 37,45 C36,44.5 35.5,43.2 35.5,42 Z" />
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M53,39.5 a1.9,1.9 0 1,0 3.8,0 a1.9,1.9 0 1,0 -3.8,0 Z" />
+
+    <!-- Cheeks. -->
+    <path
+        android:fillColor="#66FF5C85"
+        android:pathData="M36.5,63 a3,2.2 0 1,0 6,0 a3,2.2 0 1,0 -6,0 Z" />
+    <path
+        android:fillColor="#66FF5C85"
+        android:pathData="M65.5,63 a3,2.2 0 1,0 6,0 a3,2.2 0 1,0 -6,0 Z" />
+
+    <!-- Eyes. -->
+    <path
+        android:fillColor="#FF5A1A2C"
+        android:pathData="M42.2,57 a2.7,2.7 0 1,0 5.4,0 a2.7,2.7 0 1,0 -5.4,0 Z" />
+    <path
+        android:fillColor="#FF5A1A2C"
+        android:pathData="M60.4,57 a2.7,2.7 0 1,0 5.4,0 a2.7,2.7 0 1,0 -5.4,0 Z" />
+
+    <!-- Smile. -->
+    <path
+        android:pathData="M50.5,62.5 Q54,66.5 57.5,62.5"
+        android:strokeWidth="2.2"
+        android:strokeColor="#FF5A1A2C"
+        android:strokeLineCap="round" />
+</vector>
