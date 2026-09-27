@@ -43,12 +43,18 @@
 
 ## 설치 방법
 
-이 저장소에 코드가 올라가면 GitHub Actions가 자동으로 APK를 만듭니다.
+휴대폰에서 아래 링크를 누르면 GitHub 로그인 없이 최신 APK가 바로 내려받아집니다.
 
-1. GitHub 저장소의 **Actions** 탭에서 **Jelly Calendar APK** 워크플로의 가장 최근 실행을 엽니다.
-2. 아래쪽 **Artifacts**에서 `JellyCalendar-apk`를 내려받아 압축을 풉니다. (GitHub에 로그인해야 하며, 보관 기간은 기본 90일입니다.)
-3. 안의 `.apk` 파일을 휴대폰으로 옮겨 실행합니다. “출처를 알 수 없는 앱 설치”를 허용하라는 안내가 나오면 허용합니다.
-4. 새 버전이 나오면 새 APK를 그대로 설치하면 됩니다. 모든 빌드가 같은 서명 키를 쓰므로 데이터가 그대로 남습니다.
+- 최신 APK: https://github.com/ckdgus6068-sudo/ckdgus6068-sudo/releases/download/jelly-calendar-latest/JellyCalendar.apk
+- 릴리스 페이지: https://github.com/ckdgus6068-sudo/ckdgus6068-sudo/releases/latest
+
+1. 링크를 눌러 `JellyCalendar.apk`를 내려받습니다.
+2. 다운로드가 끝나면 알림을 누르거나, “내 파일” 앱의 다운로드 폴더에서 파일을 누릅니다.
+3. “출처를 알 수 없는 앱 설치” 안내가 나오면, 사용 중인 브라우저(삼성 인터넷이나 Chrome)에 설치 권한을 허용한 뒤 설치합니다. Play 프로텍트 경고가 나오면 안내에 따라 설치를 계속 진행합니다. 스토어에 등록되지 않은 앱이라서 나오는 경고입니다.
+4. 삼성의 “자동 차단” 기능이 켜져 있으면 설치가 막힙니다. 이때는 설정의 “보안 및 개인정보 보호”에서 자동 차단을 잠시 끄고 설치하세요. 메뉴 이름은 One UI 버전에 따라 조금 다를 수 있습니다.
+5. 새 버전도 같은 링크에서 받아 덮어 설치하면 됩니다. 모든 빌드가 같은 서명 키를 쓰므로 데이터가 그대로 남습니다.
+
+릴리스는 `main` 또는 `claude/`로 시작하는 브랜치에 코드가 올라갈 때마다 GitHub Actions가 새로 만듭니다. Actions 실행 결과의 Artifacts에서도 APK를 받을 수 있지만, 그쪽은 GitHub 로그인이 필요합니다.
 
 ## 데이터 보관
 
