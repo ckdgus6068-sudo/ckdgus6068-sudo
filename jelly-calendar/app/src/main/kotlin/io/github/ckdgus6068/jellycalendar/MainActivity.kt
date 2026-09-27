@@ -1,6 +1,7 @@
 package io.github.ckdgus6068.jellycalendar
 
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,6 +26,10 @@ class MainActivity : ComponentActivity() {
     private var pendingExport: String? = null
     private var pendingImport: ((String) -> Unit)? = null
 
+    /** Old alarms still to be switched off, one clock-app round trip at a time. */
+    private val pendingDismissals = ArrayDeque<Int>()
+    private var waitingForClockSince = 0L
+
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val json = pendingExport
         pendingExport = null
@@ -46,8 +51,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private val platform = object : JellyPlatform {
-        override fun setWakeAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean =
-            AlarmBridge.setAlarm(this@MainActivity, hour, minute, label, skipUi)
+        override fun setWakeAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean, dismissMinutes: List<Int>): Boolean {
+            pendingDismissals.clear()
+            // The new alarm goes first: if switching the old one off fails, the user still wakes up.
+            if (!AlarmBridge.setAlarm(this@MainActivity, hour, minute, label, skipUi)) return false
+            pendingDismissals.addAll(dismissMinutes)
+            waitingForClockSince = SystemClock.elapsedRealtime()
+            return true
+        }
 
         override fun openAlarmList(): Boolean = AlarmBridge.openAlarmList(this@MainActivity)
 
@@ -85,6 +96,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Back from the clock app: send the next switch-off request, one at a time, so the clock
+        // app never gets two requests at once. Stale requests (the user went elsewhere) are dropped.
+        if (waitingForClockSince != 0L) {
+            val fresh = SystemClock.elapsedRealtime() - waitingForClockSince < 120_000L
+            waitingForClockSince = 0L
+            if (!fresh) pendingDismissals.clear()
+            while (pendingDismissals.isNotEmpty()) {
+                val minute = pendingDismissals.removeFirst()
+                if (AlarmBridge.dismissAlarm(this, minute / 60, minute % 60)) {
+                    waitingForClockSince = SystemClock.elapsedRealtime()
+                    break
+                }
+            }
+        }
         // Coming back from Samsung Clock (or from the night): pick up the next alarm and the new day.
         app.store.observeAlarm(AlarmBridge.readNextAlarm(this))
         app.store.refresh(emptyList())

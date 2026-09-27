@@ -76,7 +76,7 @@ fun WakeCard(
                 subtitle = "오늘 아침 알람은 이미 지나갔어요"
             } else if (requestedMin == status.suggestedAlarm) {
                 title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
-                subtitle = "${hm(requestedMin)} 알람을 요청했어요. 예전 ${hm(status.alarmMin)} 알람은 시계 앱에서 꺼 주세요."
+                subtitle = "${hm(requestedMin)} 알람을 요청했어요. 예전 ${hm(status.alarmMin)} 알람이 아직 켜져 있다면 시계 앱에서 꺼 주세요."
             } else {
                 title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
                 subtitle = "알람 뒤 ${start - status.alarmMin}분 만에 시작해요 (설정은 ${gapMin}분)"

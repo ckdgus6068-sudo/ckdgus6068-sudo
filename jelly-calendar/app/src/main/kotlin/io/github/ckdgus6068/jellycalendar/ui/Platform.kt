@@ -5,10 +5,12 @@ import androidx.compose.runtime.Composable
 /** Things only the phone can do. The Android implementation lives next to MainActivity. */
 interface JellyPlatform {
     /**
-     * Asks the clock app (Samsung Clock on Galaxy phones) to create a one-time alarm.
-     * Returns false when no clock app accepted the request.
+     * Asks the clock app (Samsung Clock on Galaxy phones) to create a one-time alarm, and then to
+     * switch off the alarms at [dismissMinutes] that it replaces. The new alarm always goes first,
+     * so a failed switch-off never leaves the user without a wake-up alarm.
+     * Returns false when no clock app accepted the new alarm.
      */
-    fun setWakeAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean
+    fun setWakeAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean, dismissMinutes: List<Int>): Boolean
 
     /** Opens the clock app's alarm list. */
     fun openAlarmList(): Boolean

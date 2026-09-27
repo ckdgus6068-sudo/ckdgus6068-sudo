@@ -105,6 +105,12 @@ fun SettingsScreen(
                 checked = settings.alarmSkipUi,
                 onChange = { on -> onChange { it.copy(alarmSkipUi = on) } },
             )
+            SwitchRow(
+                title = "새 알람을 맞추면 예전 알람 끄기",
+                description = "새 알람을 먼저 추가한 뒤, 바뀌기 전 알람을 끄라고 삼성 시계에 요청해요. 반복 알람은 그날 한 번만 건너뛰어요.",
+                checked = settings.autoDismissOld,
+                onChange = { on -> onChange { it.copy(autoDismissOld = on) } },
+            )
             JellyButton(
                 "삼성 시계 알람 목록 열기",
                 onClick = onOpenAlarms,
@@ -113,7 +119,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "안드로이드 공개 기능으로는 이미 있는 알람을 지우거나 바꿀 수 없어요. 예전 알람은 시계 앱에서 꺼 주세요.",
+                "알람을 지우거나 시각을 고치는 공개 기능은 없어서, 새 알람을 추가하고 예전 알람을 끄는 방식으로 옮겨요. 기기가 끄기 요청을 지원하지 않으면 시계 앱에서 직접 꺼 주세요.",
                 color = colors.textSub,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,

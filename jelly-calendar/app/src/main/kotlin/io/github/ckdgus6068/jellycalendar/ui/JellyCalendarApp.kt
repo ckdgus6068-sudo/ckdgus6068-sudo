@@ -37,6 +37,7 @@ import io.github.ckdgus6068.jellycalendar.core.JellyCodec
 import io.github.ckdgus6068.jellycalendar.core.JellyStore
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.Routine
+import io.github.ckdgus6068.jellycalendar.core.WakeLogic
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarActions
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarScreen
 import io.github.ckdgus6068.jellycalendar.ui.calendar.ViewMode
@@ -280,10 +281,17 @@ fun JellyCalendarApp(
         }
 
         override fun setAlarm(date: LocalDate, minute: Int, label: String) {
-            val ok = platform.setWakeAlarm(minute / 60, minute % 60, label, data.settings.alarmSkipUi)
+            val replaced = WakeLogic.replacedAlarms(data, date, minute, store.now())
+            val ok = platform.setWakeAlarm(minute / 60, minute % 60, label, data.settings.alarmSkipUi, replaced)
             if (ok) {
                 store.markAlarmRequested(date, minute)
-                notify("삼성 시계에 ${hm(minute)} 알람을 요청했어요")
+                notify(
+                    if (replaced.isEmpty()) {
+                        "삼성 시계에 ${hm(minute)} 알람을 요청했어요"
+                    } else {
+                        "${hm(minute)} 알람을 추가하고, 예전 ${replaced.joinToString { hm(it) }} 알람 끄기를 요청했어요"
+                    },
+                )
             } else {
                 notify("알람을 맞출 시계 앱을 찾지 못했어요")
             }

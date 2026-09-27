@@ -93,6 +93,8 @@ data class Settings(
     val wakeGapMin: Int = 10,
     /** Create the alarm silently instead of showing the clock app's confirmation screen. */
     val alarmSkipUi: Boolean = true,
+    /** After a new wake-up alarm was added, ask the clock app to switch off the one it replaces. */
+    val autoDismissOld: Boolean = true,
     val snapMin: Int = 10,
     val idleWobble: Boolean = true,
     val doneByDoubleTap: Boolean = true,
@@ -116,7 +118,9 @@ data class AlarmRequest(
     val date: LocalDate,
     val minute: Int,
     val requestedAt: Long,
-)
+) {
+    val dateTime: LocalDateTime get() = date.atTime(LocalTime.of(minute / 60, minute % 60))
+}
 
 @Serializable
 data class AppData(

@@ -113,6 +113,28 @@ class WakeLogicTest {
     }
 
     @Test
+    fun newAlarmReplacesReportedAndPreviouslyRequestedAlarms() {
+        val observed = WakeLogic.observe(laid(), NextAlarm(monday.atTime(6, 0), null), sundayNight)
+        assertEquals(listOf(360), WakeLogic.replacedAlarms(observed, monday, 380, sundayNight))
+        val requested = observed.copy(lastAlarmRequest = AlarmRequest(monday, 370, 0L))
+        assertEquals(listOf(360, 370), WakeLogic.replacedAlarms(requested, monday, 380, sundayNight))
+        // Asking again for the same time replaces nothing new.
+        assertEquals(listOf(360), WakeLogic.replacedAlarms(requested, monday, 370, sundayNight))
+    }
+
+    @Test
+    fun replacedAlarmsRespectSettingAndTime() {
+        val observed = WakeLogic.observe(laid(), NextAlarm(monday.atTime(6, 0), null), sundayNight)
+        val off = observed.copy(settings = observed.settings.copy(autoDismissOld = false))
+        assertTrue(WakeLogic.replacedAlarms(off, monday, 380, sundayNight).isEmpty())
+        // An alarm that already rang is not touched.
+        assertTrue(WakeLogic.replacedAlarms(observed, monday, 380, monday.atTime(6, 30)).isEmpty())
+        // Another day's request is not touched either.
+        val otherDay = observed.copy(lastAlarmRequest = AlarmRequest(tuesday, 370, 0L))
+        assertEquals(listOf(360), WakeLogic.replacedAlarms(otherDay, monday, 380, sundayNight))
+    }
+
+    @Test
     fun afternoonFirstJellyGetsNoSuggestion() {
         val data = AppData(jellies = listOf(Jelly(id = "a", title = "회의", date = monday, startMin = 14 * 60)))
         assertIs<WakeStatus.Empty>(WakeLogic.status(data, monday, sundayNight))

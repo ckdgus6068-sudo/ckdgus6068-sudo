@@ -78,6 +78,20 @@ object WakeLogic {
         return alarm.takeIf { inWindow(settings, it) }
     }
 
+    /**
+     * Alarm times that a new wake-up alarm at [newMinute] on [date] replaces: the wake-up alarm the
+     * phone reported for that day and the alarm this app asked for earlier, while they are still
+     * ahead. A repeating alarm is only skipped once by the clock app, so this is safe for both kinds.
+     */
+    fun replacedAlarms(data: AppData, date: LocalDate, newMinute: Int, now: LocalDateTime): List<Int> {
+        if (!data.settings.autoDismissOld) return emptyList()
+        val minutes = LinkedHashSet<Int>()
+        data.wakeOn(date)?.takeIf { it.dateTime.isAfter(now) }?.let { minutes += it.minute }
+        data.lastAlarmRequest?.takeIf { it.date == date && it.dateTime.isAfter(now) }?.let { minutes += it.minute }
+        minutes -= newMinute
+        return minutes.toList()
+    }
+
     fun status(data: AppData, date: LocalDate, now: LocalDateTime): WakeStatus {
         val settings = data.settings
         val wake = data.wakeOn(date)
