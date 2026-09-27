@@ -298,7 +298,8 @@ fun TimelineGrid(
                         val laneWidth = geometry.colWidth / (lane?.lanes ?: 1)
                         val x = geometry.colLeft(index) + laneWidth * (lane?.lane ?: 0) + geometry.jellyPad
                         val y = geometry.yOf(start)
-                        val width = laneWidth - 2 * geometry.jellyPad
+                        // Many overlapping jellies in a narrow week column must never get a negative width.
+                        val width = (laneWidth - 2 * geometry.jellyPad).coerceAtLeast(1f)
                         key(jelly.id) {
                             TimelineJelly(
                                 jelly = jelly,
