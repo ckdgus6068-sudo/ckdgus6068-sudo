@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     /** Old alarms still to be switched off, one clock-app round trip at a time. */
     private val pendingDismissals = ArrayDeque<Int>()
+    private var dismissOwner: String? = null
     private var waitingForClockSince = 0L
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -56,6 +57,8 @@ class MainActivity : ComponentActivity() {
             // The new alarm goes first: if switching the old one off fails, the user still wakes up.
             if (!AlarmBridge.setAlarm(this@MainActivity, hour, minute, label, skipUi)) return false
             pendingDismissals.addAll(dismissMinutes)
+            // The app that made the alarm the phone reported, e.g. Samsung Clock.
+            dismissOwner = app.store.nextAlarm.value?.source
             waitingForClockSince = SystemClock.elapsedRealtime()
             return true
         }
@@ -104,7 +107,7 @@ class MainActivity : ComponentActivity() {
             if (!fresh) pendingDismissals.clear()
             while (pendingDismissals.isNotEmpty()) {
                 val minute = pendingDismissals.removeFirst()
-                if (AlarmBridge.dismissAlarm(this, minute / 60, minute % 60)) {
+                if (AlarmBridge.dismissAlarm(this, minute / 60, minute % 60, dismissOwner)) {
                     waitingForClockSince = SystemClock.elapsedRealtime()
                     break
                 }

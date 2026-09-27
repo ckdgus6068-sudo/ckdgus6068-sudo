@@ -40,13 +40,18 @@ object AlarmBridge {
         return startPreferringSamsung(activity, request)
     }
 
-    /** Asks the clock app to dismiss the alarm set for [hour]:[minute] (24-hour clock). */
-    fun dismissAlarm(activity: Activity, hour: Int, minute: Int): Boolean {
+    /**
+     * Asks the clock app that owns the alarm ([ownerPackage], else Samsung Clock) to dismiss the
+     * alarm set for [hour]:[minute] (24-hour clock). Other clock apps are never asked: they cannot
+     * hold that alarm and would only show their own screen.
+     */
+    fun dismissAlarm(activity: Activity, hour: Int, minute: Int, ownerPackage: String?): Boolean {
         val request = Intent(AlarmClock.ACTION_DISMISS_ALARM)
             .putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
             .putExtra(AlarmClock.EXTRA_HOUR, hour)
             .putExtra(AlarmClock.EXTRA_MINUTES, minute)
-        return startPreferringSamsung(activity, request)
+        val owners = listOfNotNull(ownerPackage, SAMSUNG_CLOCK).distinct()
+        return owners.any { start(activity, Intent(request).setPackage(it)) }
     }
 
     fun openAlarmList(activity: Activity): Boolean =
