@@ -98,8 +98,11 @@ object WakeLogic {
                     )
                 }
             first != null && suggested != null -> {
-                // Once the day has begun there is no point in a wake-up alarm for it.
-                val morningOver = date == now.toLocalDate() && suggested - (now.hour * 60 + now.minute) < 60
+                // Once the wake-up window has opened the day has begun: no wake-up alarm for it any more.
+                // Late at night (before the window) a same-day morning alarm still makes sense.
+                val nowMinute = now.hour * 60 + now.minute
+                val morningOver = date == now.toLocalDate() &&
+                    (nowMinute >= settings.wakeWindowStartMin || suggested - nowMinute < 60)
                 if (morningOver) WakeStatus.Empty else WakeStatus.NoAlarm(first, suggested, targetsDate(date, suggested, now))
             }
             wake != null -> WakeStatus.AlarmOnly(wake.minute, passed)

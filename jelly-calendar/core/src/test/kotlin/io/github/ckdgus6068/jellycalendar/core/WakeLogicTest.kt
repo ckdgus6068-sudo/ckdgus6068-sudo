@@ -104,6 +104,15 @@ class WakeLogicTest {
     }
 
     @Test
+    fun noWakeSuggestionOnceTheDayHasBegun() {
+        val data = AppData(jellies = listOf(Jelly(id = "a", title = "팀 점심", date = monday, startMin = 12 * 60)))
+        assertIs<WakeStatus.Empty>(WakeLogic.status(data, monday, monday.atTime(7, 20)))
+        // At 01:00 the same morning is still ahead.
+        val early = AppData(jellies = listOf(Jelly(id = "b", title = "러닝", date = monday, startMin = 6 * 60)))
+        assertIs<WakeStatus.NoAlarm>(WakeLogic.status(early, monday, monday.atTime(1, 0)))
+    }
+
+    @Test
     fun afternoonFirstJellyGetsNoSuggestion() {
         val data = AppData(jellies = listOf(Jelly(id = "a", title = "회의", date = monday, startMin = 14 * 60)))
         assertIs<WakeStatus.Empty>(WakeLogic.status(data, monday, sundayNight))
