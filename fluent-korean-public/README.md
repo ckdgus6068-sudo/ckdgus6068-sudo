@@ -9,7 +9,7 @@ LLM이 한국어로 답할 때 조사와 어미를 생략하거나, 명사로 �
 
 ## 설치
 
-- Claude 앱: 설정 화면의 스킬 메뉴에서 `fluent-korean.zip`을 업로드합니다. 메뉴의 위치와 이름은 앱 버전에 따라 다를 수 있습니다.
+- Claude 앱(claude.ai, 데스크톱 앱): Settings → Capabilities에서 ‘Code execution and file creation’을 켠 뒤, Customize → Skills → ‘+’ → ‘+ Create skill’ → ‘Upload a skill’ 순서로 `fluent-korean.zip`을 올리고 스위치를 켭니다. 일반 사용자용 단계별 안내는 저장소 최상위의 `kakao-install-guide.txt`에 있습니다.
 - Claude Code: `fluent-korean` 폴더를 `~/.claude/skills/` 아래에 복사하면 모든 프로젝트에서 사용할 수 있습니다. 특정 프로젝트에서만 사용하려면 해당 프로젝트의 `.claude/skills/` 아래에 복사합니다.
 
 ## 적용 범위
