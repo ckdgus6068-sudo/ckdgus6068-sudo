@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
+import io.github.ckdgus6068.jellycalendar.core.JellyStatus
+import io.github.ckdgus6068.jellycalendar.ui.box.JellyBoxBoard
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
 import io.github.ckdgus6068.jellycalendar.ui.common.clickableNoRipple
@@ -55,7 +57,7 @@ import io.github.ckdgus6068.jellycalendar.ui.weekTitle
 import java.time.LocalDate
 import java.time.LocalDateTime
 
-enum class ViewMode { WEEK, DAY }
+enum class ViewMode { BOX, WEEK, DAY }
 
 /** Everything the calendar screen asks its owner to do. */
 interface CalendarActions {
@@ -65,6 +67,7 @@ interface CalendarActions {
     fun goToday()
     fun open(jelly: Jelly)
     fun toggleDone(jelly: Jelly)
+    fun sendToTray(jelly: Jelly)
     fun resize(jelly: Jelly, duration: Int)
     fun create(date: LocalDate?, start: Int?)
     fun setAlarm(date: LocalDate, minute: Int, label: String)
@@ -146,6 +149,18 @@ fun CalendarScreen(
         Box(Modifier.weight(1f).padding(top = 6.dp)) {
             val scroll = if (compact) weekScroll else dayScroll
             val days = if (compact) weekDays else listOf(selected)
+            if (mode == ViewMode.BOX) {
+                JellyBoxBoard(
+                    jellies = Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED },
+                    drag = drag,
+                    doneByDoubleTap = data.settings.doneByDoubleTap,
+                    doneByLongPress = data.settings.doneByLongPress,
+                    onOpen = { actions.open(it) },
+                    onToggleDone = { actions.toggleDone(it) },
+                    onSendToTray = { actions.sendToTray(it) },
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
+                )
+            } else {
             InitialScroll(scroll, data, days, today, nowMinute, compact)
             TimelineGrid(
                 days = days,
@@ -162,6 +177,7 @@ fun CalendarScreen(
                 onSwipe = { actions.shift(it) },
                 modifier = Modifier.fillMaxSize(),
             )
+            }
             JellyFab(
                 onClick = { actions.create(if (compact && today in weekDays) today else selected, null) },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp),
@@ -267,18 +283,18 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
 private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     val colors = LocalJellyColors.current
     val position by animateFloatAsState(
-        targetValue = if (mode == ViewMode.WEEK) 0f else 1f,
+        targetValue = mode.ordinal.toFloat(),
         animationSpec = spring(dampingRatio = 0.5f, stiffness = 420f),
         label = "mode",
     )
     BoxWithConstraints(
         Modifier
-            .width(84.dp)
+            .width(120.dp)
             .height(34.dp)
             .clip(RoundedCornerShape(17.dp))
             .background(colors.surfaceSoft),
     ) {
-        val half = maxWidth / 2
+        val half = maxWidth / ViewMode.values().size
         JellyBody(
             flavor = JellyFlavors[0],
             modifier = Modifier
@@ -298,7 +314,11 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        if (option == ViewMode.WEEK) "주" else "일",
+                        when (option) {
+                            ViewMode.BOX -> "상자"
+                            ViewMode.WEEK -> "주"
+                            ViewMode.DAY -> "일"
+                        },
                         color = if (option == mode) JellyFlavors[0].ink else colors.textSub,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,

@@ -80,7 +80,7 @@ fun JellyCalendarApp(
     store: JellyStore,
     platform: JellyPlatform,
     modifier: Modifier = Modifier,
-    initialMode: ViewMode = ViewMode.WEEK,
+    initialMode: ViewMode = ViewMode.BOX,
     initialScreen: Screen = Screen.CALENDAR,
 ) {
     val data by store.data.collectAsState()
@@ -149,7 +149,7 @@ fun JellyCalendarApp(
                         jelly.id,
                     )
                     store.move(jelly.id, target.date, start)
-                    if (mode == ViewMode.DAY && target.date != selected) notify("${dateTitle(target.date)}로 옮겼어요")
+                    if (mode != ViewMode.WEEK && target.date != selected) notify("${dateTitle(target.date)}로 옮겼어요")
                 }
                 DropTarget.Tray -> {
                     store.sendToTray(jelly.id)
@@ -273,6 +273,11 @@ fun JellyCalendarApp(
 
         override fun toggleDone(jelly: Jelly) = store.toggleDone(jelly.id)
 
+        override fun sendToTray(jelly: Jelly) {
+            store.sendToTray(jelly.id)
+            notify("‘${jelly.title}’ 젤리를 보관함에 넣었어요", undo = true)
+        }
+
         override fun resize(jelly: Jelly, duration: Int) = store.resize(jelly.id, duration)
 
         override fun create(date: LocalDate?, start: Int?) {
@@ -314,8 +319,8 @@ fun JellyCalendarApp(
         override fun dismissHint() = store.updateSettings { it.copy(hintDismissed = true) }
     }
 
-    platform.BackHandler(enabled = editor == null && (screen != Screen.CALENDAR || mode == ViewMode.DAY)) {
-        if (screen != Screen.CALENDAR) screen = Screen.CALENDAR else mode = ViewMode.WEEK
+    platform.BackHandler(enabled = editor == null && (screen != Screen.CALENDAR || mode != ViewMode.BOX)) {
+        if (screen != Screen.CALENDAR) screen = Screen.CALENDAR else mode = ViewMode.BOX
     }
 
     JellyTheme {
