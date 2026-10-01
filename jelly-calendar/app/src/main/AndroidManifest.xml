@@ -4,6 +4,9 @@
     <!-- Needed to ask the clock app (Samsung Clock) to create a wake-up alarm. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
+    <!-- Only the shared tab ("공유 젤리") goes online; personal jellies stay on the phone. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <queries>
         <package android:name="com.sec.android.app.clockpackage" />
         <intent>

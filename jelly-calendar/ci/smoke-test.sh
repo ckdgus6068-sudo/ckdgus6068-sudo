@@ -47,6 +47,8 @@ shot 2-box
 tap_text "주" && sleep 4 && shot 3-week
 tap_text "일" && sleep 4 && shot 4-day
 tap_text "상자" && sleep 6 && shot 5-box-again
+tap_text "공유" && sleep 12 && shot 5b-shared
+tap_text "상자" && sleep 3
 
 # Cold start again, now with saved data and the guide already seen.
 adb shell am force-stop "$pkg"

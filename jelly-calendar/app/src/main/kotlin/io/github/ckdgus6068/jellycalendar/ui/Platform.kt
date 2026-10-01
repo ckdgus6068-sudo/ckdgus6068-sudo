@@ -1,7 +1,14 @@
 package io.github.ckdgus6068.jellycalendar.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
+import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 
 /** Things only the phone can do. The Android implementation lives next to MainActivity. */
 interface JellyPlatform {
@@ -30,4 +37,19 @@ interface JellyPlatform {
 
     /** The installed version, e.g. "0.2.12", shown in settings. */
     val appVersion: String get() = ""
+
+    /** The shared calendar ("공유 젤리"), a web page that the other person can open on any phone. */
+    @Composable
+    fun SharedSpace(modifier: Modifier) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(
+                "이 기기에서는 공유 젤리를 열 수 없어요.",
+                color = LocalJellyColors.current.textSub,
+                modifier = Modifier.padding(24.dp),
+            )
+        }
+    }
+
+    /** Lets the shared page take the back button first, e.g. to close an open sheet. */
+    fun sharedBack(): Boolean = false
 }

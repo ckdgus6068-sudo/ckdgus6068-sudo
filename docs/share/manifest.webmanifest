@@ -1,0 +1,14 @@
+{
+  "name": "공유 젤리",
+  "short_name": "공유 젤리",
+  "description": "둘이 함께 보고 고치는 한 달 젤리 달력",
+  "lang": "ko",
+  "display": "standalone",
+  "scope": "./",
+  "background_color": "#FFF9F5",
+  "theme_color": "#FFF9F5",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

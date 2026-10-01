@@ -336,7 +336,11 @@ fun JellyCalendarApp(
     }
 
     platform.BackHandler(enabled = editor == null && (screen != Screen.CALENDAR || mode != ViewMode.BOX)) {
-        if (screen != Screen.CALENDAR) screen = Screen.CALENDAR else mode = ViewMode.BOX
+        when {
+            screen != Screen.CALENDAR -> screen = Screen.CALENDAR
+            mode == ViewMode.SHARED && platform.sharedBack() -> Unit
+            else -> mode = ViewMode.BOX
+        }
     }
 
     val type = remember(data.settings.font, platform.fonts) { jellyType(data.settings.font, platform.fonts) }
@@ -359,6 +363,7 @@ fun JellyCalendarApp(
                         weekScroll = weekScroll,
                         dayScroll = dayScroll,
                         actions = actions,
+                        sharedSpace = { platform.SharedSpace(it) },
                     )
                     Screen.ROUTINES -> RoutinesScreen(
                         routines = data.routines,

@@ -1,0 +1,138 @@
+rules_version = '2';
+
+// Shared jellies ("공유 젤리").
+//
+// spaces/{spaceId}                         one shared calendar, holding a random secret
+// spaces/{spaceId}/members/{uid}           who is in it; a member doc carries the secret
+// spaces/{spaceId}/jellies/{jellyId}       the shared jellies, editable by every member
+// spaces/{spaceId}/jellies/{id}/memos/{m}  memos on a jelly, removable by their writer
+// invites/{code}                           short-lived code that hands out a space's secret
+//
+// Everyone signs in anonymously. Knowing a space's secret (from an invite code) is what lets a
+// person join; after that, membership alone decides access.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function spacePath(spaceId) {
+      return /databases/$(database)/documents/spaces/$(spaceId);
+    }
+
+    function isMember(spaceId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/spaces/$(spaceId)/members/$(request.auth.uid));
+    }
+
+    function isName(value) {
+      return value is string && value.size() >= 1 && value.size() <= 20;
+    }
+
+    match /spaces/{spaceId} {
+      allow get: if isMember(spaceId);
+      allow list: if false;
+
+      // A new space is created together with its creator's member doc (see below).
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'secret', 'createdBy', 'createdAt'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.secret is string
+        && request.resource.data.secret.size() >= 20
+        && isName(request.resource.data.name);
+
+      // Members may rename the space; nothing else about it changes.
+      allow update: if isMember(spaceId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && isName(request.resource.data.name);
+
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(spaceId);
+
+        // Joining: only yourself, and only with the space's secret. getAfter() also covers the
+        // batch that creates the space and its first member at once.
+        allow create: if signedIn()
+          && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['name', 'secret', 'joinedAt'])
+          && isName(request.resource.data.name)
+          && request.resource.data.secret == getAfter(spacePath(spaceId)).data.secret;
+
+        // Renaming yourself.
+        allow update: if signedIn()
+          && uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && isName(request.resource.data.name);
+
+        // Leaving.
+        allow delete: if signedIn() && uid == request.auth.uid;
+      }
+
+      match /jellies/{jellyId} {
+        function validJelly(d) {
+          return d.keys().hasOnly(['title', 'date', 'start', 'duration', 'flavor', 'done', 'note',
+                                   'by', 'byName', 'createdAt', 'updatedBy', 'updatedByName',
+                                   'updatedAt', 'memoCount', 'lastMemoAt'])
+            && d.title is string && d.title.size() >= 1 && d.title.size() <= 80
+            && d.date is string && d.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && (d.start == null || (d.start is int && d.start >= 0 && d.start < 1440))
+            && d.duration is int && d.duration >= 5 && d.duration <= 1440
+            && d.flavor is int && d.flavor >= 0 && d.flavor < 10
+            && d.done is bool
+            && d.note is string && d.note.size() <= 1000
+            && d.memoCount is int && d.memoCount >= 0;
+        }
+
+        allow read: if isMember(spaceId);
+
+        allow create: if isMember(spaceId)
+          && validJelly(request.resource.data)
+          && request.resource.data.by == request.auth.uid
+          && request.resource.data.updatedBy == request.auth.uid
+          && request.resource.data.memoCount == 0;
+
+        // Any member may change a shared jelly, but not who put it there. A memo only moves the
+        // memo counter, so it does not count as an edit of the jelly itself.
+        allow update: if isMember(spaceId)
+          && validJelly(request.resource.data)
+          && request.resource.data.by == resource.data.by
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (
+            request.resource.data.updatedBy == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memoCount', 'lastMemoAt'])
+          );
+
+        allow delete: if isMember(spaceId);
+
+        match /memos/{memoId} {
+          allow read: if isMember(spaceId);
+          allow create: if isMember(spaceId)
+            && request.resource.data.keys().hasOnly(['text', 'by', 'byName', 'at'])
+            && request.resource.data.by == request.auth.uid
+            && request.resource.data.text is string
+            && request.resource.data.text.size() >= 1
+            && request.resource.data.text.size() <= 500;
+          // Your own memos may be removed by you; when a jelly is deleted, its memos go with it.
+          allow delete: if isMember(spaceId)
+            && (resource.data.by == request.auth.uid
+                || !existsAfter(/databases/$(database)/documents/spaces/$(spaceId)/jellies/$(jellyId)));
+        }
+      }
+    }
+
+    match /invites/{code} {
+      // Whoever holds the code may read it; nobody may list codes.
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['spaceId', 'secret', 'by', 'expiresAt'])
+        && request.resource.data.by == request.auth.uid
+        && isMember(request.resource.data.spaceId)
+        && request.resource.data.secret == get(spacePath(request.resource.data.spaceId)).data.secret
+        && request.resource.data.expiresAt is timestamp;
+      allow delete: if signedIn() && resource.data.by == request.auth.uid;
+    }
+  }
+}

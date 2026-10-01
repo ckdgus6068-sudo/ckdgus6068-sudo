@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "jelly-calendar/**"
+      - "docs/**"
       - ".github/workflows/jelly-calendar-apk.yml"
   workflow_dispatch:
 
@@ -43,6 +44,53 @@ jobs:
           name: JellyCalendar-apk
           path: jelly-calendar/dist/*.apk
           if-no-files-found: error
+
+  # The shared calendar ("공유 젤리"): security rules and a two-phone run through the web app,
+  # both against the Firebase emulators.
+  shared:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: jelly-calendar/share
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: jelly-calendar/share/package-lock.json
+
+      - name: Install tools
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: The bundled Firebase SDK matches the lockfile
+        run: |
+          npm run bundle
+          git diff --exit-code -- ../../docs/share/vendor/firebase.js
+
+      - name: Security rules
+        run: npm run test:rules
+
+      - name: Two phones on one shared calendar
+        run: npm run test:e2e
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shared-screenshots
+          path: jelly-calendar/share/test-results/
+          if-no-files-found: ignore
 
   # Opens the new APK on an Android emulator: fails when the app crashes, and puts screenshots
   # and the log on the "jelly-calendar-smoke" pre-release so they can be seen without signing in.

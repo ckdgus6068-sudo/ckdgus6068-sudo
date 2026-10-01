@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -59,7 +60,7 @@ import io.github.ckdgus6068.jellycalendar.ui.weekTitle
 import java.time.LocalDate
 import java.time.LocalDateTime
 
-enum class ViewMode { BOX, WEEK, DAY }
+enum class ViewMode { BOX, WEEK, DAY, SHARED }
 
 /** Everything the calendar screen asks its owner to do. */
 interface CalendarActions {
@@ -92,11 +93,22 @@ fun CalendarScreen(
     dayScroll: ScrollState,
     actions: CalendarActions,
     modifier: Modifier = Modifier,
+    sharedSpace: @Composable (Modifier) -> Unit = {},
 ) {
     val today = now.toLocalDate()
     val nowMinute = now.hour * 60 + now.minute
     val weekDays = remember(weekStart) { Planner.weekDays(weekStart) }
     val compact = mode == ViewMode.WEEK
+
+    // The shared calendar is a page of its own, the same one the other person opens on an iPhone.
+    if (mode == ViewMode.SHARED) {
+        Column(modifier.fillMaxSize()) {
+            TopBar(title = "공유 젤리", subtitle = "함께 보고 고치는 한 달", mode = mode, actions = actions, showArrows = false)
+            // The page has its own text fields (memos), so it makes room for the keyboard itself.
+            sharedSpace(Modifier.weight(1f).fillMaxWidth().imePadding())
+        }
+        return
+    }
 
     Column(modifier.fillMaxSize()) {
         TopBar(
@@ -234,7 +246,13 @@ private fun InitialScroll(
 }
 
 @Composable
-private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: CalendarActions) {
+private fun TopBar(
+    title: String,
+    subtitle: String?,
+    mode: ViewMode,
+    actions: CalendarActions,
+    showArrows: Boolean = true,
+) {
     val colors = LocalJellyColors.current
     val type = LocalJellyType.current
     var menu by remember { mutableStateOf(false) }
@@ -242,14 +260,18 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = { actions.shift(-1) }) {
-            @Suppress("DEPRECATION")
-            Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "이전", tint = colors.text)
+        if (showArrows) {
+            IconButton(onClick = { actions.shift(-1) }) {
+                @Suppress("DEPRECATION")
+                Icon(Icons.Filled.KeyboardArrowLeft, contentDescription = "이전", tint = colors.text)
+            }
+        } else {
+            Spacer(Modifier.width(14.dp))
         }
         Column(
             Modifier
                 .weight(1f)
-                .clickableNoRipple { actions.goToday() },
+                .clickableNoRipple { if (showArrows) actions.goToday() },
         ) {
             FitText(
                 title,
@@ -261,9 +283,11 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
             )
             Text(subtitle ?: "눌러서 오늘로", color = if (subtitle != null) colors.accent else colors.textSub, fontSize = 11.sp)
         }
-        IconButton(onClick = { actions.shift(1) }) {
-            @Suppress("DEPRECATION")
-            Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "다음", tint = colors.text)
+        if (showArrows) {
+            IconButton(onClick = { actions.shift(1) }) {
+                @Suppress("DEPRECATION")
+                Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "다음", tint = colors.text)
+            }
         }
         ModeToggle(mode) { actions.changeMode(it) }
         Box {
@@ -296,7 +320,7 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
     }
 }
 
-/** "상자 | 주 | 일" switch with a jelly that slides between the three. */
+/** "상자 | 주 | 일 | 공유" switch with a jelly that slides between them. */
 @Composable
 private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     val colors = LocalJellyColors.current
@@ -307,7 +331,7 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     )
     BoxWithConstraints(
         Modifier
-            .width(120.dp)
+            .width(164.dp)
             .height(34.dp)
             .clip(RoundedCornerShape(17.dp))
             .background(colors.surfaceSoft),
@@ -336,6 +360,7 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
                             ViewMode.BOX -> "상자"
                             ViewMode.WEEK -> "주"
                             ViewMode.DAY -> "일"
+                            ViewMode.SHARED -> "공유"
                         },
                         color = if (option == mode) JellyFlavors[0].ink else colors.textSub,
                         fontSize = 14.sp,
