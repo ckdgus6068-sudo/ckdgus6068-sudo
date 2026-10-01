@@ -27,6 +27,22 @@ tap_text() {
     adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 
+# Like tap_text, but the lowest match on screen: the view buttons sit in the bottom bar, while the
+# same words ("일" for Sunday) can also appear higher up in the calendar.
+tap_bottom() {
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    adb exec-out cat /sdcard/ui.xml > "$out/ui.xml"
+    local bounds
+    bounds=$(grep -o "text=\"$1\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$out/ui.xml" |
+        sed -E 's/.*bounds="\[([0-9]+),([0-9]+)\]\[([0-9]+),([0-9]+)\]".*/\1 \2 \3 \4/' | sort -k2,2n | tail -n 1)
+    if [ -z "$bounds" ]; then
+        echo "::warning::no element with text $1"
+        return 1
+    fi
+    set -- $bounds
+    adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+
 alive() {
     [ -n "$(adb shell pidof "$pkg" | tr -d '\r')" ]
 }
@@ -44,9 +60,10 @@ adb shell input keyevent KEYCODE_BACK
 sleep 5
 shot 2-box
 
-tap_text "주" && sleep 4 && shot 3-week
-tap_text "일" && sleep 4 && shot 4-day
-tap_text "상자" && sleep 6 && shot 5-box-again
+tap_bottom "주" && sleep 4 && shot 3-week
+tap_bottom "일" && sleep 4 && shot 4-day
+tap_bottom "달" && sleep 4 && shot 4b-month
+tap_bottom "상자" && sleep 6 && shot 5-box-again
 tap_text "공유 젤리" && sleep 12 && shot 5b-shared
 tap_text "모두" && sleep 8 && shot 5c-all
 tap_text "내 젤리" && sleep 3
