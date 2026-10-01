@@ -84,6 +84,12 @@ class MainActivity : ComponentActivity() {
             androidx.activity.compose.BackHandler(enabled = enabled, onBack = onBack)
         }
 
+        override val appVersion: String
+            get() = runCatching {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0).versionName
+            }.getOrNull().orEmpty()
+
         override val fonts = BundledFonts(
             // One heavy weight only: declared as Black so that Compose never fakes a bolder one.
             round = FontFamily(Font(R.font.bagel_fat_one, FontWeight.Black)),

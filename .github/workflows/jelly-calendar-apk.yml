@@ -44,6 +44,58 @@ jobs:
           path: jelly-calendar/dist/*.apk
           if-no-files-found: error
 
+  # Opens the new APK on an Android emulator: fails when the app crashes, and puts screenshots
+  # and the log on the "jelly-calendar-smoke" pre-release so they can be seen without signing in.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: JellyCalendar-apk
+          path: dist
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run the app on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash jelly-calendar/ci/smoke-test.sh "$(ls dist/*.apk | head -n 1)" smoke
+
+      - name: Publish screenshots and log
+        if: always() && (github.event_name == 'workflow_dispatch' || github.ref_name == 'main' || startsWith(github.ref_name, 'claude/'))
+        run: |
+          set -uo pipefail
+          files=$(ls smoke/*.png smoke/logcat.txt 2>/dev/null || true)
+          if [ -z "$files" ]; then echo "nothing to publish"; exit 0; fi
+          tag=jelly-calendar-smoke
+          gh release delete "$tag" --yes --cleanup-tag || true
+          gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${tag}" >/dev/null 2>&1 || true
+          sleep 3
+          gh release create "$tag" $files \
+            --target "$GITHUB_SHA" \
+            --prerelease --latest=false \
+            --title "에뮬레이터 실행 확인 (${GITHUB_SHA::7})" \
+            --notes "새 APK를 안드로이드 에뮬레이터에서 실행해 찍은 화면과 로그입니다. 설치용 파일은 jelly-calendar-latest 릴리스에 있습니다."
+
   # Replaces one rolling release so that the phone can always download the newest APK
   # from the same link, without signing in:
   # https://github.com/<owner>/<repo>/releases/download/jelly-calendar-latest/JellyCalendar.apk

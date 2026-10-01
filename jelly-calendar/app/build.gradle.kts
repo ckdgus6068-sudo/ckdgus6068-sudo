@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// Every GitHub Actions build gets a higher version, so the phone always sees an update as newer
+// and the settings screen can show which build is installed. Local builds are 0.2.0.
+val ciRun = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0
+
 android {
     namespace = "io.github.ckdgus6068.jellycalendar"
     compileSdk = 35
@@ -14,8 +18,8 @@ android {
         applicationId = "io.github.ckdgus6068.jellycalendar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 1 + ciRun
+        versionName = "0.2.$ciRun"
     }
 
     signingConfigs {

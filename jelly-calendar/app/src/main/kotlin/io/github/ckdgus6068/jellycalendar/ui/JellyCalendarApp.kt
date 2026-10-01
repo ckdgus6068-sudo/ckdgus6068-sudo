@@ -376,6 +376,7 @@ fun JellyCalendarApp(
                         onChange = { store.updateSettings(it) },
                         onOpenGuide = { screen = Screen.GUIDE },
                         fonts = platform.fonts,
+                        appVersion = platform.appVersion,
                         onOpenAlarms = { actions.openAlarms() },
                         onClearTray = {
                             store.clearTray()

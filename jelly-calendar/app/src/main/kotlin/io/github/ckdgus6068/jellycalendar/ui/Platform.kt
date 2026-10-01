@@ -27,4 +27,7 @@ interface JellyPlatform {
 
     /** The typefaces bundled with the app; without them the phone's own font is used. */
     val fonts: BundledFonts get() = BundledFonts.None
+
+    /** The installed version, e.g. "0.2.12", shown in settings. */
+    val appVersion: String get() = ""
 }

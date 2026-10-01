@@ -46,6 +46,7 @@ fun SettingsScreen(
     onChange: ((Settings) -> Settings) -> Unit,
     onOpenGuide: () -> Unit,
     fonts: BundledFonts,
+    appVersion: String,
     onOpenAlarms: () -> Unit,
     onClearTray: () -> Unit,
     onExport: () -> Unit,
@@ -205,6 +206,14 @@ fun SettingsScreen(
                 enabled = trayCount > 0,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (appVersion.isNotEmpty()) {
+                Text(
+                    "젤리 캘린더 $appVersion",
+                    color = colors.textSub,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 20.dp),
+                )
+            }
             Spacer(Modifier.height(40.dp))
         }
     }
