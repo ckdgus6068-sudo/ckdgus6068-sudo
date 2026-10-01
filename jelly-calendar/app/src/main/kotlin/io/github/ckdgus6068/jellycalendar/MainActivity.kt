@@ -242,6 +242,18 @@ class MainActivity : ComponentActivity() {
             runOnUiThread { app.store.makeGolden(personalId.ifEmpty { null }) }
         }
 
+        /** A clock alarm for a shared jelly, asked for on the shared page (24-hour [hour]:[minute]). */
+        @JavascriptInterface
+        fun setAlarm(hour: Int, minute: Int, label: String) {
+            if (hour !in 0..23 || minute !in 0..59) return
+            runOnUiThread {
+                val skipUi = app.store.current.settings.alarmSkipUi
+                if (!AlarmBridge.setAlarm(this@MainActivity, hour, minute, label.take(60), skipUi)) {
+                    toast("알람을 맞출 시계 앱을 찾지 못했어요")
+                }
+            }
+        }
+
         @JavascriptInterface
         fun openPersonal(id: String) = onHost { it.openPersonal(id) }
 

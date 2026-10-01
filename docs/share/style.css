@@ -1272,3 +1272,26 @@ body.fill #app {
   }
 }
 
+.alarm-row {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface-soft);
+  font-weight: 600;
+}
+
+.alarm-controls {
+  margin-top: 10px;
+  justify-content: space-between;
+}
+
+.small-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.small-btn:disabled {
+  opacity: 0.45;
+}
+

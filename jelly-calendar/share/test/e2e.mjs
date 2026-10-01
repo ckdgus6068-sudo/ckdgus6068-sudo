@@ -332,6 +332,7 @@ try {
       showShared: call('showShared'),
       showDay: call('showDay'),
       foundGolden: call('foundGolden'),
+      setAlarm: call('setAlarm'),
     };
   }, `${month}-17`);
   const called = (page, name, arg) => page.waitForFunction(
@@ -392,6 +393,7 @@ try {
   await app.mouse.click(shared.x, shared.y);
   await tid(app, 'memos').waitFor();
   check(true, 'all: a tap on a shared jelly opens it with its memos');
+  check(await tid(app, 'alarm').isDisabled(), 'all: the clock alarm waits for a jelly with a time in the coming day');
   await app.goBack();
 
   const room = await tid(app, 'box').boundingBox();

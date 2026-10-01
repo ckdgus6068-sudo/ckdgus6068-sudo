@@ -1341,6 +1341,59 @@ function stretchLength(get, set, onEnd) {
   return { el: h('div', { class: 'stretch' }, track, ticks), paint };
 }
 
+/**
+ * "⏰ 시작 전 알람" inside the Android app: the app asks the clock app for an alarm a little before the
+ * jelly starts. The clock app takes a time but no date, so only the coming 24 hours are offered.
+ */
+function alarmRow(draft) {
+  if (!bridge?.setAlarm) return null;
+  let before = 10;
+  let asked = null;
+  const note = h('small', { class: 'toggle-note' });
+  const chips = h('div', { class: 'row' });
+  const button = h('button', { class: 'btn small-btn', type: 'button', 'data-testid': 'alarm' }, '알람 맞추기');
+  const at = () => {
+    if (!draft.date || draft.start == null) return null;
+    const d = parseDay(draft.date);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, draft.start - before);
+  };
+  const paint = () => {
+    const t = at();
+    const ahead = t ? t.getTime() - Date.now() : null;
+    const possible = ahead != null && ahead >= 0 && ahead < 24 * 3600 * 1000;
+    const done = asked != null && t && asked === t.getTime();
+    chips.replaceChildren(...[[0, '정각'], [10, '10분 전'], [30, '30분 전']].map(([m, label]) => h('button', {
+      class: `chip${before === m ? ' on' : ''}`,
+      type: 'button',
+      onClick: () => {
+        before = m;
+        paint();
+      },
+    }, label)));
+    note.textContent = !t
+      ? '날짜와 시간이 있는 젤리에 알람을 맞출 수 있어요.'
+      : done
+        ? `${hm(t.getHours() * 60 + t.getMinutes())} 알람을 시계 앱에 부탁했어요. 띠링!`
+        : possible
+          ? `${hm(t.getHours() * 60 + t.getMinutes())}에 울리도록 시계 앱에 알람을 맞춰요.`
+          : '시계 앱은 날짜 없이 시각만 받아서, 24시간 안에 울릴 알람만 맞출 수 있어요.';
+    button.disabled = !possible || done;
+    button.textContent = done ? '✓ 맞췄어요' : '알람 맞추기';
+  };
+  button.addEventListener('click', () => {
+    const t = at();
+    if (!t) return;
+    const title = (draft.title || '젤리').trim();
+    bridge.setAlarm(t.getHours(), t.getMinutes(), before === 0 ? `${title} 시작` : `${title} ${before}분 전`);
+    asked = t.getTime();
+    paint();
+  });
+  const el = h('div', { class: 'alarm-row' },
+    h('div', { class: 'toggle-text' }, h('span', null, '⏰ 시작 전 알람'), note),
+    h('div', { class: 'row alarm-controls' }, chips, button));
+  return { el, paint };
+}
+
 /** How many jellies of [date] are pinned, leaving out [exceptId]. */
 function pinsOn(date, exceptId) {
   return state.jellies.filter((j) => j.date === date && j.pinned && j.id !== exceptId).length;
@@ -1376,6 +1429,7 @@ function buildJellySheet() {
   const pinRow = h('button', { class: 'toggle', type: 'button', 'data-testid': 'pin' },
     h('span', { class: 'toggle-text' }, h('span', null, '📌 젤위로 고정'), pinNote), pinSwitch);
   const selfId = isNew ? null : s.id;
+  const alarm = isNew ? null : alarmRow(draft);
   const note = h('textarea', { class: 'input', placeholder: '장소, 준비물 같은 설명 (선택)', maxlength: '1000' }, draft.note || '');
   const whoLine = h('div', { class: 'who-line' });
 
@@ -1409,6 +1463,7 @@ function buildJellySheet() {
     for (const [k, v] of Object.entries(flavorVars(draft.flavor))) preview.style.setProperty(`--${k}`, v);
     preview.classList.toggle('done', !!draft.done);
     length.paint(draft.flavor);
+    alarm?.paint();
     const full = !draft.pinned && pinsOn(draft.date, selfId) >= MAX_PINNED;
     pinSwitch.classList.toggle('on', !!draft.pinned);
     pinRow.classList.toggle('muted', full);
@@ -1569,6 +1624,7 @@ function buildJellySheet() {
 
     children.push(
       doneRow,
+      alarm?.el,
       h('div', { class: 'field-label' }, '설명'),
       note,
       whoLine,
