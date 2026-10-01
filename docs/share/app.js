@@ -848,7 +848,7 @@ function renderWelcome(code = '') {
       h('p', null, '함께 보고 고치는 젤리 달력이에요.'),
       h('div', { class: 'field-label' }, '내 이름'),
       name,
-      h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
+      h('div', { class: 'field-label' }, '내 색 (내 캐릭터의 색이자 새 젤리의 기본 색)'),
       colors,
       h('div', { class: 'field-label' }, '내 캐릭터'),
       lookBox,
@@ -2143,6 +2143,14 @@ function pinsOn(date, exceptId) {
   return state.jellies.filter((j) => j.date === date && j.pinned && j.id !== exceptId).length;
 }
 
+/** A new jelly's time, as in the app: today a little after now (not before 8:00), another day 9:00. */
+function defaultStart(iso) {
+  if (iso !== todayIso()) return 9 * 60;
+  const now = new Date();
+  const soon = Math.max(now.getHours() * 60 + now.getMinutes() + 10, 8 * 60);
+  return Math.min(Math.round(soon / 10) * 10, 23 * 60);
+}
+
 function buildJellySheet() {
   const s = state.sheet;
   const isNew = s.kind === 'new';
@@ -2151,7 +2159,10 @@ function buildJellySheet() {
   // The draft that is shown and edited; for an existing jelly, changes are saved as they happen.
   const draft = existing
     ? { ...existing }
-    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.myColor, done: false, note: '', pinned: false };
+    : (() => {
+        const date = s.date || state.selected;
+        return { title: '', date, start: defaultStart(date), duration: 60, flavor: state.myColor, done: false, note: '', pinned: false };
+      })();
 
   const preview = h('div', { class: 'jelly card', style: { animation: 'none', marginBottom: '6px' } });
   const title = h('input', {
@@ -2163,7 +2174,9 @@ function buildJellySheet() {
   });
   const date = h('input', { class: 'input', type: 'date', value: draft.date, 'data-testid': 'date' });
   const time = h('input', { class: 'input', type: 'time', value: draft.start == null ? '' : hm(draft.start), 'data-testid': 'time' });
-  const noTime = h('button', { class: 'chip', type: 'button' }, '시간 없음');
+  // An empty time field is a blank box on an iPhone: it says what it is for.
+  const timeBox = h('label', { class: 'time-box' }, time, h('span', { class: 'time-empty', 'aria-hidden': 'true' }, '시간 정하기'));
+  const noTime = h('button', { class: 'chip', type: 'button', 'data-testid': 'no-time' }, '시간 없음');
   const length = stretchLength(() => draft.duration, (m) => save({ duration: m }), () => save({}, true));
   const colorRow = h('div', { class: 'row' });
   const doneSwitch = h('span', { class: 'switch' });
@@ -2222,6 +2235,7 @@ function buildJellySheet() {
       onClick: () => save({ flavor: i }, true),
     })));
     noTime.classList.toggle('on', draft.start == null);
+    timeBox.classList.toggle('blank', draft.start == null);
     doneSwitch.classList.toggle('on', !!draft.done);
   }
 
@@ -2276,7 +2290,7 @@ function buildJellySheet() {
     h('div', { class: 'field-label' }, '길이 · 쭉 당기면 늘어나요'),
     length.el,
     h('div', { class: 'field-label' }, '언제'),
-    h('div', { class: 'row' }, date, time, noTime),
+    h('div', { class: 'row' }, date, timeBox, noTime),
     pinRow,
   ];
 
@@ -2509,6 +2523,20 @@ function copyText(text) {
   navigator.clipboard?.writeText(text).then(() => toast('복사했어요'), () => toast('복사하지 못했어요'));
 }
 
+/**
+ * "내 프로필": me as the others see me (character, colour, name), at the top of the menu that the
+ * circles at the top right open. A tap changes them.
+ */
+function profileCard() {
+  const me = state.members.find((m) => m.uid === state.uid);
+  return h('button', { class: 'look-row profile-card', type: 'button', onClick: () => openReplace({ kind: 'name' }), 'data-testid': 'profile' },
+    lookSvg(myLook(), memberBody(state.uid), 58),
+    h('span', { class: 'look-row-text' },
+      h('strong', null, me?.name || state.myName || '나'),
+      h('small', null, '눌러서 캐릭터 · 색 · 이름 바꾸기')),
+    h('span', { class: 'look-row-go' }, '›'));
+}
+
 function buildMenuSheet() {
   const owner = state.space?.owner;
   const iOwn = owner === state.uid;
@@ -2542,11 +2570,12 @@ function buildMenuSheet() {
 
   const alone = state.members.length <= 1;
   sheetFrame(
-    h('div', { class: 'day-title', style: { marginBottom: '8px' } }, '함께 쓰는 사람'),
+    h('div', { class: 'day-title', style: { marginBottom: '8px' } }, '내 프로필'),
+    profileCard(),
+    h('div', { class: 'day-title', style: { margin: '18px 0 8px' } }, '함께 쓰는 사람'),
     people,
     h('div', { class: 'menu-list' },
       h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'invite' }), 'data-testid': 'invite' }, '함께 쓸 사람 초대하기'),
-      h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'name' }), 'data-testid': 'profile' }, '내 이름 · 색 · 캐릭터 바꾸기'),
       h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'rename' }), 'data-testid': 'rename' }, '달력 이름 바꾸기'),
       h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'groups' }), 'data-testid': 'menu-groups' }, '다른 공유 달력 · 달력 더 만들기'),
       h('button', {
@@ -3020,10 +3049,10 @@ function buildNameSheet() {
   };
   paintColors();
   sheetFrame(
-    h('div', { class: 'day-title' }, '내 이름, 색, 캐릭터 바꾸기'),
+    h('div', { class: 'day-title' }, '내 프로필 바꾸기'),
     h('div', { class: 'field-label' }, '함께 쓰는 사람에게 보이는 이름'),
     name,
-    h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
+    h('div', { class: 'field-label' }, '내 색 (내 캐릭터의 색이자 새 젤리의 기본 색)'),
     colors,
     h('div', { class: 'field-label' }, '내 캐릭터 (모든 공유 달력에서 같아요)'),
     lookBox,
@@ -3038,7 +3067,7 @@ function buildNameSheet() {
         try {
           await store.updateProfile(state.spaceId, { name: n, color, look: myLook() });
           closeSheet();
-          toast('이름과 색을 바꿨어요');
+          toast('프로필을 바꿨어요');
         } catch (e) {
           console.error(e);
           toast('바꾸지 못했어요');

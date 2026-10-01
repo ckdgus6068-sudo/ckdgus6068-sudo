@@ -1594,3 +1594,34 @@ body.fill #app {
   text-decoration: underline;
 }
 
+
+/* The time field: an empty one says "시간 정하기" instead of showing a blank box. */
+.time-box {
+  position: relative;
+  display: inline-flex;
+}
+
+.time-box .time-empty {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  padding: 0 13px;
+  pointer-events: none;
+  color: var(--text-sub);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.time-box.blank .time-empty {
+  display: flex;
+}
+
+.time-box.blank input {
+  color: transparent;
+}
+
+/* "내 프로필" at the top of the menu. */
+.profile-card {
+  margin-bottom: 4px;
+}

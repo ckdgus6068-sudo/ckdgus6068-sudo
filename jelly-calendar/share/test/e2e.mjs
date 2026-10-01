@@ -171,6 +171,8 @@ try {
   await openDay(a, day);
   check((await daySheet(a).textContent()).includes('비어 있어요'), 'galaxy: a tapped day opens its jellies at once (none yet)');
   await tid(a, 'day-add').click();
+  const startsAt = await tid(a, 'time').inputValue();
+  check(/^\d\d:\d\d$/.test(startsAt), `galaxy: a new jelly starts with a time, as in the app (${startsAt})`);
   await tid(a, 'title').fill('저녁 약속');
   await tid(a, 'time').fill('19:00');
   await tid(a, 'post').click();
@@ -245,6 +247,7 @@ try {
     await tid(page, 'day-add').click();
     await tid(page, 'title').fill(title);
     if (time) await tid(page, 'time').fill(time);
+    else await tid(page, 'no-time').click();
     if (title === '주말 등산') {
       // Pulled all the way out: a whole day's hike.
       const track = await tid(page, 'length').boundingBox();
@@ -253,6 +256,10 @@ try {
     }
     await tid(page, 'post').click();
     await tid(page, 'memos').waitFor();
+    if (!time) {
+      check(await page.locator('.time-box.blank .time-empty').isVisible(), 'galaxy: a jelly without a time says "시간 정하기" in its empty time field');
+      await shot(page, '6a-galaxy-no-time');
+    }
     await backToMonth(page);
   }
   await openDay(b, day);
@@ -411,7 +418,22 @@ try {
   check((await display(b)).includes('Jua') && (await b.evaluate(() => localStorage.getItem('jellyShare.font'))) === 'JUA',
     'iphone: picks another lettering and keeps it');
   await tid(b, 'fonts').getByText('동글', { exact: true }).click();
-  await b.goBack();
+  // "내 프로필" at the top of the menu: the character and its colour change from there.
+  check((await tid(b, 'profile').textContent()).includes('지은'), 'iphone: the menu starts with my profile');
+  const bodyOf = '[data-testid="menu"] .avatar[title="지은"] svg circle';
+  const oldBody = await a.locator(bodyOf).first().getAttribute('fill');
+  await tid(b, 'profile').click();
+  await tid(b, 'profile-name').waitFor();
+  const onColor = await b.locator('.sheet .swatch.on').getAttribute('data-testid');
+  await tid(b, onColor === 'color-7' ? 'color-2' : 'color-7').click();
+  await tid(b, 'profile-save').click();
+  await b.locator('.sheet').waitFor({ state: 'detached' });
+  const recoloured = await a.waitForFunction(
+    ([sel, old]) => document.querySelector(sel)?.getAttribute('fill') !== old,
+    [bodyOf, oldBody],
+    { timeout: 10000 },
+  ).then(() => true, () => false);
+  check(recoloured, `iphone: a new colour from my profile reaches the other phone (was ${oldBody})`);
 
   // The hidden golden jelly: grab the same jelly 50 times in a row.
   const grab = async (page, title, times, at) => {
