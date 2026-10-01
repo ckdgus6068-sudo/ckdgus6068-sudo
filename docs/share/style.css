@@ -678,11 +678,53 @@ body.fill .box-bar .bottom-bar {
 }
 
 .handle {
+  position: relative;
   width: 42px;
   height: 5px;
   border-radius: 3px;
   background: var(--line-strong);
   margin: 2px auto 12px;
+  touch-action: none;
+}
+
+/* A bigger place to grab the handle than the little bar itself. */
+.handle::before {
+  content: '';
+  position: absolute;
+  inset: -14px -70px -10px;
+}
+
+/* ✕ at the top right of a sheet; it stays in reach while the sheet scrolls. */
+.sheet-top {
+  position: sticky;
+  top: 8px;
+  height: 0;
+  z-index: 2;
+}
+
+.sheet-close {
+  position: absolute;
+  top: -2px;
+  right: -8px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-soft);
+  color: var(--text-sub);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 36px;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* While a sheet is up the page under it stays still, so a pull never becomes pull-to-refresh. */
+html.sheet-open,
+html.sheet-open body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .field-label {

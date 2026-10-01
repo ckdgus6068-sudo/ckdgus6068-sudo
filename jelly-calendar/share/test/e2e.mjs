@@ -91,6 +91,19 @@ const openDay = async (page, iso) => {
   await page.locator(`[data-day="${iso}"]`).click();
   await daySheet(page).waitFor();
 };
+// A finger pulling the open sheet down by its handle, with real touch events.
+const pullDown = async (page, distance, steps = 10) => {
+  const handle = await page.locator('.sheet .handle').boundingBox();
+  const x = handle.x + handle.width / 2;
+  const y = handle.y + handle.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y: y + (distance * i) / steps }] });
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+};
 // Back to the month: a jelly opened on a day's sheet goes back to the day first, then the month.
 const backToMonth = async (page) => {
   for (let i = 0; i < 4 && (await page.evaluate(() => !!history.state?.sheet)); i++) await page.goBack();
@@ -182,10 +195,26 @@ try {
   await b.locator('.memo', { hasText: '2번 출구' }).waitFor();
   await b.waitForTimeout(1200);
   await shot(b, '4-iphone-sheet-memo');
-  await b.goBack();
+  // Every sheet has ✕; the jelly's goes back to its day.
+  await tid(b, 'sheet-close').click();
   await sheetCards(b, '7시 반').waitFor();
-  check(true, 'iphone: back from the jelly, its day is there again');
-  await backToMonth(b);
+  check(true, 'iphone: ✕ closes the jelly and its day is there again');
+  // Pulled down by the handle: a little springs back, far enough closes, and the page is not reloaded.
+  await b.evaluate(() => {
+    window.__stayed = true;
+  });
+  await pullDown(b, 24);
+  await b.waitForTimeout(500);
+  check(
+    (await daySheet(b).count()) === 1 && (await daySheet(b).evaluate((el) => el.style.transform)) === '',
+    'iphone: a short pull on the handle springs the sheet back',
+  );
+  await pullDown(b, 320);
+  await daySheet(b).waitFor({ state: 'detached', timeout: 5000 });
+  check(
+    await b.evaluate(() => window.__stayed === true && !history.state?.sheet && !document.documentElement.classList.contains('sheet-open')),
+    'iphone: pulled down by its handle, the sheet closes, and the page stays (no reload)',
+  );
 
   // 5. Galaxy sees the edit and the memo right away, on the day's sheet still open.
   await sheetCards(a, '7시 반').waitFor({ timeout: 10000 });

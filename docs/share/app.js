@@ -1817,6 +1817,7 @@ function hideSheet() {
   state.sheet = null;
   document.querySelector('.scrim')?.remove();
   document.querySelector('.sheet')?.remove();
+  document.documentElement.classList.remove('sheet-open');
 }
 
 /** Back from a sheet opened on a day's sheet: that day's sheet again. */
@@ -1841,7 +1842,7 @@ function buildDaySheet() {
   const open = document.querySelector('.sheet[data-sheet="day"]');
   if (open && open.dataset.date === iso) {
     const top = open.scrollTop;
-    open.replaceChildren(h('div', { class: 'handle' }), ...content);
+    open.replaceChildren(...sheetTop(), ...content);
     open.scrollTop = top;
     return;
   }
@@ -1851,13 +1852,101 @@ function buildDaySheet() {
   sheet.setAttribute('data-testid', 'day-sheet');
 }
 
+/** The top of every sheet: ✕ to close it (it stays in reach while the sheet scrolls) and the handle. */
+function sheetTop() {
+  return [
+    h('div', { class: 'sheet-top' },
+      h('button', { class: 'sheet-close', type: 'button', 'aria-label': '닫기', onClick: closeSheet, 'data-testid': 'sheet-close' }, '✕')),
+    h('div', { class: 'handle' }),
+  ];
+}
+
 function sheetFrame(...children) {
   document.querySelector('.scrim')?.remove();
   document.querySelector('.sheet')?.remove();
   const scrim = h('div', { class: 'scrim', onClick: closeSheet });
-  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, h('div', { class: 'handle' }), ...children);
+  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true' }, ...sheetTop(), ...children);
   document.body.append(scrim, sheet);
+  // The page under a sheet stays still: no scrolling behind it, no pull-to-refresh.
+  document.documentElement.classList.add('sheet-open');
+  pullToClose(sheet, scrim);
   return sheet;
+}
+
+/**
+ * A sheet follows a finger pulling it down, by its handle or from the top of what it shows, and
+ * closes when let go far enough down or with a flick; otherwise it springs back. The pull is kept
+ * from the browser, which would otherwise scroll the page or reload it (pull-to-refresh).
+ */
+function pullToClose(sheet, scrim) {
+  let startY = null;
+  let lastY = 0;
+  let lastT = 0;
+  let speed = 0;
+  let pulling = false;
+  sheet.addEventListener('touchstart', (e) => {
+    startY = null;
+    pulling = false;
+    if (e.touches.length !== 1) return;
+    const onHandle = e.target.closest('.handle, .sheet-top');
+    // Text fields and the stretchy length keep their own gestures; scrolled content scrolls back first.
+    if (!onHandle && (sheet.scrollTop > 0 || e.target.closest('input, textarea, select, [role="slider"]'))) return;
+    startY = lastY = e.touches[0].clientY;
+    lastT = e.timeStamp;
+    speed = 0;
+  }, { passive: true });
+  sheet.addEventListener('touchmove', (e) => {
+    if (startY == null || e.touches.length !== 1) return;
+    const y = e.touches[0].clientY;
+    const dy = y - startY;
+    if (!pulling && dy < 0) {
+      // Upwards: the content scrolls as usual.
+      startY = null;
+      return;
+    }
+    if (dy <= 0) return;
+    if (e.cancelable) e.preventDefault();
+    if (!pulling) {
+      if (dy < 6) return;
+      pulling = true;
+      sheet.style.animation = 'none';
+      sheet.style.transition = 'none';
+      scrim.style.transition = 'none';
+    }
+    speed = (y - lastY) / Math.max(1, e.timeStamp - lastT);
+    lastY = y;
+    lastT = e.timeStamp;
+    sheet.style.transform = `translateY(${dy}px)`;
+    scrim.style.opacity = String(Math.max(0.15, 1 - dy / Math.max(1, sheet.offsetHeight)));
+  }, { passive: false });
+  const letGo = (cancelled) => {
+    if (startY == null) return;
+    const dy = Math.max(0, lastY - startY);
+    const was = pulling;
+    startY = null;
+    pulling = false;
+    if (!was) return;
+    const mine = state.sheet;
+    if (!cancelled && (dy > Math.min(140, sheet.offsetHeight * 0.3) || (speed > 0.5 && dy > 30))) {
+      sheet.style.transition = 'transform 0.18s ease-in';
+      sheet.style.transform = `translateY(${sheet.offsetHeight + 24}px)`;
+      scrim.style.transition = 'opacity 0.18s ease-in';
+      scrim.style.opacity = '0';
+      setTimeout(() => {
+        if (state.sheet === mine) closeSheet();
+      }, 170);
+    } else {
+      sheet.style.transition = 'transform 0.25s cubic-bezier(0.2, 1.3, 0.4, 1)';
+      sheet.style.transform = '';
+      scrim.style.transition = 'opacity 0.2s';
+      scrim.style.opacity = '';
+    }
+  };
+  sheet.addEventListener('touchend', () => letGo(false));
+  sheet.addEventListener('touchcancel', () => letGo(true));
+  scrim.addEventListener('touchmove', (e) => {
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
 }
 
 function buildSheet() {
