@@ -555,7 +555,7 @@ internal fun hintText(mode: ViewMode, doubleTapDone: Boolean, longPressDone: Boo
     ).joinToString(" 또는 ")
     val parts = ArrayList<String>()
     parts += "톡: 열기"
-    if (done.isNotEmpty()) parts += "$done: 완료"
+    if (done.isNotEmpty()) parts += "$done: 다 먹었어요"
     if (mode == ViewMode.BOX) {
         parts += "끌기: 흔들기"
         parts += "위 날짜나 아래 보관함에 놓기: 옮기기"
@@ -563,7 +563,7 @@ internal fun hintText(mode: ViewMode, doubleTapDone: Boolean, longPressDone: Boo
     } else if (mode == ViewMode.MONTH) {
         parts.clear()
         parts += "날짜 톡: 그날 젤리 보기"
-        parts += "보관함 젤리를 날짜에 놓기: 그날로 옮기기"
+        parts += "보관함 젤리를 날짜에 놓기: 시간 골라 넣기"
         parts += "옆으로 밀기: 다른 달"
     } else {
         parts += "꾹 눌러 끌기: 옮기기"

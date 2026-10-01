@@ -148,12 +148,12 @@ fun SettingsScreen(
             ThinDivider()
             SectionTitle("젤리")
             SwitchRow(
-                title = "두 번 톡 해서 완료",
+                title = "두 번 톡 하면 다 먹었어요",
                 checked = settings.doneByDoubleTap,
                 onChange = { on -> onChange { it.copy(doneByDoubleTap = on) } },
             )
             SwitchRow(
-                title = "꾹 눌렀다 떼서 완료",
+                title = "꾹 눌렀다 떼면 다 먹었어요",
                 description = "꾹 누른 채 움직이면 옮기기가 돼요.",
                 checked = settings.doneByLongPress,
                 onChange = { on -> onChange { it.copy(doneByLongPress = on) } },
