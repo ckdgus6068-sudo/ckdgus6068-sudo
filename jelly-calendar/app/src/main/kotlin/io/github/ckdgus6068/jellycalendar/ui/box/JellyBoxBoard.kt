@@ -68,6 +68,7 @@ import io.github.ckdgus6068.jellycalendar.core.GOLDEN_GRABS
 import io.github.ckdgus6068.jellycalendar.core.GOLDEN_HINT
 import io.github.ckdgus6068.jellycalendar.core.GrabStreak
 import io.github.ckdgus6068.jellycalendar.core.Jelly
+import io.github.ckdgus6068.jellycalendar.core.Look
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragSource
@@ -75,6 +76,8 @@ import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
 import io.github.ckdgus6068.jellycalendar.ui.durationText
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.keepWords
+import io.github.ckdgus6068.jellycalendar.ui.jelly.drawLookBack
+import io.github.ckdgus6068.jellycalendar.ui.jelly.drawLookFront
 import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyClock
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyType
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
@@ -108,7 +111,12 @@ private data class LabelKey(
     val durationMin: Int,
     val done: Boolean,
     val diameter: Int,
+    /** A face goes above the name, which then keeps to the lower part. */
+    val faced: Boolean = false,
 )
+
+/** A jelly wearing a character shows its face from this diameter up (dp); smaller ones only wear the hat. */
+private const val FACE_MIN = 84
 
 /** A jelly's text, laid out once for its size and drawn every frame. */
 private class BlobLabel(
@@ -142,6 +150,8 @@ fun JellyBoxBoard(
     onGolden: (Jelly) -> Unit = {},
     /** Pinned jellies sway on their pins while the box is still ("말랑말랑 숨쉬기"). */
     idleWobble: Boolean = true,
+    /** The character my jellies wear ("내 젤리에도 입히기"), or null. */
+    look: Look? = null,
 ) {
     val world = remember { SoftBodyWorld() }
     var frame by remember { mutableIntStateOf(0) }
@@ -208,13 +218,15 @@ fun JellyBoxBoard(
             val ordered = jellies.filter { it.id !in pinnedIds }.sortedBy { it.startMin ?: 0 }
             val gap = with(density) { 6.dp.toPx() }
             val pinDiameter = if (pinned.isEmpty()) 0f else minOf(w / pinned.size * 0.8f, h * 0.24f, w * 0.42f)
-            val pinBottom = if (pinned.isEmpty()) 0f else pad + gap + pinDiameter + gap
+            // A hat on a pinned jelly needs room under the top of the box.
+            val hatRoom = if (look != null && !look.plain) pinDiameter * 0.3f else 0f
+            val pinBottom = if (pinned.isEmpty()) 0f else pad + gap + hatRoom + pinDiameter + gap
             val totalArea = w * (h - pinBottom)
             val wanted = ordered.associate { it.id to max(it.durationMin, 10) / 540f * 0.8f * totalArea }
             val sum = wanted.values.sum()
             val scale = if (sum > 0.82f * totalArea) 0.82f * totalArea / sum else 1f
             LaunchedEffect(w, h) { world.resize(w, h, pad) }
-            LaunchedEffect(jellies.map { Triple(it.id, it.durationMin, it.id in pinnedIds) }, w, h) {
+            LaunchedEffect(jellies.map { Triple(it.id, it.durationMin, it.id in pinnedIds) }, w, h, hatRoom) {
                 world.resize(w, h, pad)
                 world.pinnedBottom = pinBottom
                 val ids = jellies.map { it.id }.toSet()
@@ -223,7 +235,7 @@ fun JellyBoxBoard(
                 labels.keys.retainAll(ids)
                 pinned.forEachIndexed { index, jelly ->
                     val cx = w * (index + 0.5f) / pinned.size
-                    val cy = pad + gap + pinDiameter / 2f
+                    val cy = pad + gap + hatRoom + pinDiameter / 2f
                     val area = PI.toFloat() * pinDiameter * pinDiameter / 4f
                     val blob = world.blobs[jelly.id]
                     if (blob == null) {
@@ -413,18 +425,25 @@ fun JellyBoxBoard(
                 if (frame < 0 || streakTick < 0) return@Canvas
                 val path = Path()
 
-                fun drawJelly(blob: SoftBlob, jelly: Jelly) {
-                    blobPath(blob, path)
+                val wearing = look?.takeUnless { it.plain }
+                val faceMin = FACE_MIN.dp.toPx()
+
+                fun colorOf(jelly: Jelly): Color {
                     val base = boxColor(jelly.flavor)
-                    val color = if (jelly.isDone) lerp(base, Color.Black, 0.35f) else base
+                    return if (jelly.isDone) lerp(base, Color.Black, 0.35f) else base
+                }
+
+                fun drawBody(blob: SoftBlob, jelly: Jelly) {
+                    blobPath(blob, path)
+                    val color = colorOf(jelly)
                     // Carried away over the calendar: only a faint shape stays behind.
                     val away = drag.isGhost(jelly.id) || drag.isHidden(jelly.id)
+                    if (!away) drawLookBack(wearing, Offset(blob.centroidX(), blob.centroidY()), sqrt(blob.targetArea / PI.toFloat()), color)
                     drawPath(path, if (away) color.copy(alpha = 0.25f) else color)
                     if (away) return
                     val gold = jelly.flavor == GOLDEN_FLAVOR
-                    val glitter = streak.glitter(jelly.id)
-                    if (gold || glitter > 0f) blob.updateBounds()
                     if (gold && !jelly.isDone) {
+                        blob.updateBounds()
                         drawPath(
                             path,
                             Brush.linearGradient(GOLD_SHEEN, Offset(blob.minX, blob.minY), Offset(blob.maxX, blob.maxY)),
@@ -432,39 +451,70 @@ fun JellyBoxBoard(
                     }
                     if (jelly.isDone) drawPath(path, Color.White.copy(alpha = 0.85f), style = Stroke(width = 2.5.dp.toPx()))
                     if (blob.id == world.grabId) drawPath(path, Color.White, style = Stroke(width = 3.dp.toPx()))
+                }
 
+                // The character's face and hat, the name, sparkles and the pin.
+                fun drawDress(blob: SoftBlob, jelly: Jelly) {
+                    if (drag.isGhost(jelly.id) || drag.isHidden(jelly.id)) return
+                    val r = sqrt(blob.targetArea / PI.toFloat())
+                    val cx = blob.centroidX()
+                    val cy = blob.centroidY()
+                    val faced = wearing != null && 2f * r >= faceMin
+                    if (wearing != null) {
+                        val color = colorOf(jelly)
+                        // The face moves with the jelly's middle, above its name; the hat sits on its top.
+                        if (faced) drawLookFront(wearing, Offset(cx, cy), r, color, faceY = -36f, faceScale = 0.72f, head = false, bodyParts = false)
+                        blob.updateBounds()
+                        drawLookFront(wearing, Offset(cx, blob.minY + r), r, color, face = false, bodyParts = false, hatLift = if (faced) 6f else 0f)
+                    }
+                    val gold = jelly.flavor == GOLDEN_FLAVOR
+                    val glitter = streak.glitter(jelly.id)
+                    if (gold || glitter > 0f) blob.updateBounds()
                     val key = LabelKey(
                         title = jelly.title.ifBlank { "이름 없는 젤리" },
                         startMin = jelly.startMin,
                         durationMin = jelly.durationMin,
                         done = jelly.isDone,
-                        diameter = (2f * sqrt(blob.targetArea / PI.toFloat()) / 4f).roundToInt() * 4,
+                        diameter = (2f * r / 4f).roundToInt() * 4,
+                        faced = faced,
                     )
                     val label = labels[jelly.id]?.takeIf { it.key == key }
                         ?: layoutLabel(measurer, key, type, this).also { labels[jelly.id] = it }
-                    drawLabel(label, blob.centroidX(), blob.centroidY())
+                    drawLabel(label, cx, if (faced) cy + r * 0.26f else cy)
                     if (gold) drawSparkles(blob, 1f, frame, 4)
                     if (glitter > 0f) drawSparkles(blob, glitter, frame, 2 + (glitter * 4).roundToInt())
-                    if (burstId == blob.id) drawBurst(Offset(blob.centroidX(), blob.centroidY()), blob, burst.value)
+                    if (burstId == blob.id) drawBurst(Offset(cx, cy), blob, burst.value)
                     if (blob.fixed) drawPin(Offset(blob.pinX, blob.pinY), 9.dp.toPx())
                 }
 
                 val seconds = if (idleWobble) sway else 0f
-                // Pinned jellies are drawn last, on top of the ones falling in behind them.
-                for (blob in world.blobs.values.sortedBy { it.fixed }) {
-                    val jelly = current.find { it.id == blob.id } ?: continue
-                    if (blob.fixed && idleWobble) {
-                        val phase = swayPhase(blob.id)
-                        val bob = 1f + 0.02f * sin(seconds * 3.3f + phase * 1.7f)
-                        val pivot = Offset(blob.pinX, blob.pinY)
-                        withTransform({
-                            rotate(degrees = 2.3f * sin(seconds * 1.9f + phase), pivot = pivot)
-                            scale(scaleX = 1f / sqrt(bob), scaleY = bob, pivot = pivot)
-                        }) {
-                            drawJelly(blob, jelly)
-                        }
-                    } else {
-                        drawJelly(blob, jelly)
+
+                // A pinned jelly swings a little from side to side around its pin, and bobs.
+                fun hanging(blob: SoftBlob, paint: () -> Unit) {
+                    if (!blob.fixed || !idleWobble) {
+                        paint()
+                        return
+                    }
+                    val phase = swayPhase(blob.id)
+                    val bob = 1f + 0.02f * sin(seconds * 3.3f + phase * 1.7f)
+                    val pivot = Offset(blob.pinX, blob.pinY)
+                    withTransform({
+                        rotate(degrees = 2.3f * sin(seconds * 1.9f + phase), pivot = pivot)
+                        scale(scaleX = 1f / sqrt(bob), scaleY = bob, pivot = pivot)
+                    }) { paint() }
+                }
+
+                // The jellies falling in first, then the pinned ones in front of them. In each, all the
+                // bodies first and then the faces, hats and names, so no jelly hides its neighbour's hat.
+                val all = world.blobs.values.toList()
+                for (group in listOf(all.filterNot { it.fixed }, all.filter { it.fixed })) {
+                    for (blob in group) {
+                        val jelly = current.find { it.id == blob.id } ?: continue
+                        hanging(blob) { drawBody(blob, jelly) }
+                    }
+                    for (blob in group) {
+                        val jelly = current.find { it.id == blob.id } ?: continue
+                        hanging(blob) { drawDress(blob, jelly) }
                     }
                 }
             }
@@ -502,8 +552,8 @@ fun JellyBoxBoard(
 private fun layoutLabel(measurer: TextMeasurer, key: LabelKey, type: JellyType, density: Density): BlobLabel {
     val d = key.diameter.toFloat()
     val px = density.density
-    val maxWidth = (d * 0.74f).toInt().coerceAtLeast(1)
-    val maxHeight = d * 0.62f
+    val maxWidth = (d * (if (key.faced) 0.7f else 0.74f)).toInt().coerceAtLeast(1)
+    val maxHeight = d * (if (key.faced) 0.44f else 0.62f)
     val ink = if (key.done) Color.White else INK
 
     val minTitle = 10f * px

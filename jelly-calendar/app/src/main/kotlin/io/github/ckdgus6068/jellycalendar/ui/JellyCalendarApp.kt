@@ -398,6 +398,8 @@ fun JellyCalendarApp(
         weekStartsOnSunday = data.settings.weekStartsOnSunday,
         font = data.settings.font,
         idleWobble = data.settings.idleWobble,
+        look = data.settings.look,
+        lookOnMine = data.settings.lookOnMine,
         actions = hostActions,
     )
 

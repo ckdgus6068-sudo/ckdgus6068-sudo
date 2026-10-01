@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
+import io.github.ckdgus6068.jellycalendar.core.Look
 import io.github.ckdgus6068.jellycalendar.ui.JellyCalendarApp
 import io.github.ckdgus6068.jellycalendar.ui.JellyPlatform
 import io.github.ckdgus6068.jellycalendar.ui.SharedHost
@@ -298,6 +299,16 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun showShared() = onHost { it.showShared() }
+
+        /** My character, picked on the shared page (or handed over from it): kept in the settings. */
+        @JavascriptInterface
+        fun setLook(json: String) {
+            val look = runCatching {
+                val o = JSONObject(json)
+                Look(o.getString("job").take(40), if (o.optInt("v") == 1) 1 else 0)
+            }.getOrNull() ?: return
+            runOnUiThread { app.store.updateSettings { it.copy(look = look) } }
+        }
     }
 
     private fun onHost(request: (SharedHostActions) -> Unit) {
@@ -338,6 +349,8 @@ class MainActivity : ComponentActivity() {
             .put("sundayFirst", host.weekStartsOnSunday)
             .put("font", host.font.name)
             .put("wobble", host.idleWobble)
+            .apply { host.look?.let { put("look", JSONObject().put("job", it.job).put("v", it.v)) } }
+            .put("lookOnMine", host.lookOnMine)
             .put("personal", personal)
             .toString()
     }

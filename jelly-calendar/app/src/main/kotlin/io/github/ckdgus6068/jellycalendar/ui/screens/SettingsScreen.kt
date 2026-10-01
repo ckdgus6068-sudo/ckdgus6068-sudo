@@ -15,6 +15,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -24,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.core.GoldenFind
+import io.github.ckdgus6068.jellycalendar.core.Look
 import io.github.ckdgus6068.jellycalendar.core.NextAlarm
 import io.github.ckdgus6068.jellycalendar.core.Settings
 import io.github.ckdgus6068.jellycalendar.ui.alarmSourceName
@@ -60,6 +65,7 @@ fun SettingsScreen(
     onImport: () -> Unit,
 ) {
     val colors = LocalJellyColors.current
+    var pickingLook by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("설정", onBack)
         Column(
@@ -188,6 +194,27 @@ fun SettingsScreen(
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
             )
+            Spacer(Modifier.height(8.dp))
+            ThinDivider()
+            SectionTitle("내 캐릭터")
+            LookRow(look = settings.look ?: Look.FIRST, onClick = { pickingLook = true })
+            SwitchRow(
+                title = "내 젤리에도 입히기",
+                description = "상자에서 내 젤리도 이 캐릭터가 돼요. 끄면 공유 달력에서만 이 모습이에요.",
+                checked = settings.lookOnMine,
+                onChange = { on -> onChange { it.copy(lookOnMine = on) } },
+            )
+            if (pickingLook) {
+                LookPickerDialog(
+                    current = settings.look ?: Look.FIRST,
+                    onPick = { look ->
+                        onChange { it.copy(look = look) }
+                        pickingLook = false
+                    },
+                    onDismiss = { pickingLook = false },
+                )
+            }
+
             Spacer(Modifier.height(12.dp))
             JellyButton(
                 "사용법 보기",

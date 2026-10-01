@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.core.Jelly
+import io.github.ckdgus6068.jellycalendar.core.Look
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import java.time.LocalDate
@@ -83,6 +84,9 @@ class SharedHost(
     val font: FontChoice,
     /** "말랑말랑 숨쉬기": pinned jellies sway in the page's box too. */
     val idleWobble: Boolean,
+    /** My character (null until picked: the page then hands over its own), and whether mine wear it. */
+    val look: Look?,
+    val lookOnMine: Boolean,
     val actions: SharedHostActions,
 )
 

@@ -115,7 +115,30 @@ data class Settings(
     /** The how-to screen opens by itself once, on the first launch that has it. */
     val guideSeen: Boolean = false,
     val font: FontChoice = FontChoice.NANUM_ROUND,
+    /**
+     * My jelly character, the same in every shared calendar. Null until one is picked here: the
+     * shared page then hands over the one picked there, if any (else it is the smiling face).
+     */
+    val look: Look? = null,
+    /** My own jellies wear my character too, not only the ones I put up in a shared calendar. */
+    val lookOnMine: Boolean = false,
 )
+
+/**
+ * A jelly character: a job of [LookBook] ("face" is just a face) in one of its two outfits [v].
+ * Any other job is a plain jelly. The shared page keeps the same in people's profiles.
+ */
+@Serializable
+data class Look(val job: String, val v: Int = 0) {
+    /** A plain jelly: no face and no outfit. */
+    val plain: Boolean get() = LookBook.job(job) == null
+
+    companion object {
+        /** Someone who has not picked a character yet: the smiling face. */
+        val FIRST = Look("face", 0)
+        val PLAIN = Look("none", 0)
+    }
+}
 
 /** A wake-up time observed from the system's next alarm, remembered per day. */
 @Serializable

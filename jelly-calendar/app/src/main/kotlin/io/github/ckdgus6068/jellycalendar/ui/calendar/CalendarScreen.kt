@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
+import io.github.ckdgus6068.jellycalendar.core.Look
 import io.github.ckdgus6068.jellycalendar.core.KoreanHolidays
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
@@ -190,6 +191,7 @@ fun CalendarScreen(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
                         onGolden = { actions.foundGolden(it) },
                         idleWobble = data.settings.idleWobble,
+                        look = if (data.settings.lookOnMine) data.settings.look ?: Look.FIRST else null,
                     )
                     ViewMode.MONTH -> MonthView(
                         data = data,

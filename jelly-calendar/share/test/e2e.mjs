@@ -511,6 +511,22 @@ try {
   });
   check((await display(app)).includes('Bagel'), 'all: follows the lettering picked in the app');
 
+  // The character picked in the app's settings: my own jellies wear it when the app says so, and
+  // the page puts it into my profile in every calendar.
+  await app.evaluate(() => {
+    window.__host = { ...window.__host, look: { job: 'chef', v: 1 }, lookOnMine: true };
+    window.jellyHost.poke();
+  });
+  await app.waitForFunction(
+    () => [...window.__jellyBox.byKey.values()].some((it) => it.ref?.kind === 'personal' && it.look?.job === 'chef' && it.look?.v === 1),
+    null,
+    { timeout: 5000 },
+  );
+  check(true, 'all: my own jellies wear the character picked in the app');
+  await a.locator('.look-avatar[data-look="chef-1"]').first().waitFor({ timeout: 10000 });
+  check(true, 'all: the app\'s character reaches my profile, and the other pages see it');
+  await shot(app, '11c-galaxy-all-looks');
+
   // "모두" as a month: my jellies and the shared ones, and a tapped day goes to the app.
   await tid(app, 'view-month').click();
   await tid(app, 'grid').waitFor();

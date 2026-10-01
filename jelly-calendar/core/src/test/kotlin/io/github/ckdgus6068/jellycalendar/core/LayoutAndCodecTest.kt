@@ -64,6 +64,29 @@ class LayoutAndCodecTest {
     }
 
     @Test
+    fun characterIsKept() {
+        val data = AppData(settings = Settings(look = Look("police", 1), lookOnMine = true))
+        assertEquals(data, JellyCodec.decode(JellyCodec.encode(data)))
+        // A plain jelly is a choice of its own, kept apart from "not picked yet".
+        val plain = AppData(settings = Settings(look = Look.PLAIN))
+        assertEquals(Look.PLAIN, JellyCodec.decode(JellyCodec.encode(plain)).settings.look)
+        assertTrue(Look.PLAIN.plain)
+        assertFalse(Look.FIRST.plain)
+        assertEquals(null, JellyCodec.decode("{\"settings\":{\"wakeGapMin\":15}}").settings.look)
+    }
+
+    @Test
+    fun everyJobHasTwoOutfitsAndAName() {
+        assertEquals(21, LookBook.jobs.size)
+        for (job in LookBook.jobs) {
+            assertEquals(2, job.variants.size, job.id)
+            assertTrue(job.name.isNotBlank(), job.id)
+        }
+        assertTrue(LookBook.variantFaces.all { it in LookBook.faces })
+        assertEquals(LookBook.jobs.size, LookBook.jobs.map { it.id }.toSet().size)
+    }
+
+    @Test
     fun codecToleratesUnknownFields() {
         val text = """{"version":1,"jellies":[{"id":"a","title":"x","future":42}],"extra":true}"""
         val data = JellyCodec.decode(text)
