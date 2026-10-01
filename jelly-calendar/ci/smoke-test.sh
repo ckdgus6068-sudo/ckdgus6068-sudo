@@ -72,11 +72,17 @@ adb logcat -d -b crash > "$out/crash.txt" 2>/dev/null || true
 
 status=$flat_page
 grep -E 'CONSOLE.*(Uncaught|TypeError|ReferenceError)' "$out/logcat.txt" | head -n 20
-if grep -q "FATAL EXCEPTION" "$out/logcat.txt" || [ -s "$out/crash.txt" ]; then
+# Only the app's own crashes count: uiautomator, which this script runs to find the tabs, now and
+# then dies by itself ("FATAL EXCEPTION: UiAutomation") without anything being wrong with the app.
+# Java crashes name the app's process; native ones (tombstones) show ">>> package <<<".
+app_crash="AndroidRuntime: Process: $pkg|>>> $pkg <<<"
+if grep -qE "$app_crash" "$out/logcat.txt" "$out/crash.txt" 2>/dev/null; then
     echo "::error::the app crashed"
-    grep -n -A 40 "FATAL EXCEPTION" "$out/logcat.txt" | head -n 160
-    cat "$out/crash.txt" | head -n 160
+    grep -h -E -B 2 -A 40 "$app_crash" "$out/logcat.txt" | head -n 160
     status=1
+elif grep -q "FATAL EXCEPTION" "$out/logcat.txt"; then
+    echo "::warning::another process crashed (not the app):"
+    grep -A 3 "FATAL EXCEPTION" "$out/logcat.txt" | head -n 8
 fi
 if ! alive; then
     echo "::error::the app is not running at the end"
