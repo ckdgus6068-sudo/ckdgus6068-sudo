@@ -1625,3 +1625,8 @@ body.fill #app {
 .profile-card {
   margin-bottom: 4px;
 }
+
+/* Under the time: "시간을 제목의 ‘11시’에 맞췄어요." or the one-tap "제목대로 11:00". */
+.title-time:not(:empty) {
+  margin-top: 8px;
+}

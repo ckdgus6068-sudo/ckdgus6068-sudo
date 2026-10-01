@@ -61,6 +61,7 @@ import io.github.ckdgus6068.jellycalendar.core.JellyStatus
 import io.github.ckdgus6068.jellycalendar.core.KoreanHolidays
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.Routine
+import io.github.ckdgus6068.jellycalendar.core.TitleTime
 import io.github.ckdgus6068.jellycalendar.core.WEEKDAYS
 import io.github.ckdgus6068.jellycalendar.core.WEEKEND
 import io.github.ckdgus6068.jellycalendar.ui.common.AlarmDateDialog
@@ -124,6 +125,34 @@ class EditorState(
 
     /** Minutes before the start that a clock alarm is set for. */
     var alarmBefore by mutableStateOf(10)
+
+    /** The time was set by hand: a time written in the title no longer moves it. */
+    var timeTouched by mutableStateOf(false)
+
+    /** The words in the title ("11시") that a new jelly's time was taken from. */
+    var timeFromTitle by mutableStateOf<String?>(null)
+    private var startBeforeTitle: Int? = null
+
+    /** A new jelly or repeating jelly starts when its title says ("11시 미용실"), until its time is set by hand. */
+    fun followTitle() {
+        if (!isNew || timeTouched || (kind == EditorKind.JELLY && date == null)) return
+        val said = TitleTime.find(title)
+        if (said != null) {
+            if (timeFromTitle == null) startBeforeTitle = start
+            start = Planner.clampStart(said.minute, duration)
+            timeFromTitle = said.text
+        } else if (timeFromTitle != null) {
+            start = startBeforeTitle
+            timeFromTitle = null
+        }
+    }
+
+    /** The time set by hand. */
+    fun setStartByHand(minute: Int) {
+        start = Planner.clampStart(minute, duration)
+        timeTouched = true
+        timeFromTitle = null
+    }
 
     val isNew: Boolean get() = if (kind == EditorKind.JELLY) jellyId == null else routineId == null
     val repeats: Boolean get() = kind == EditorKind.ROUTINE || days.isNotEmpty()
@@ -211,7 +240,10 @@ fun JellyForm(
         val flavor = JellyFlavors[state.flavor]
         BasicTextField(
             value = state.title,
-            onValueChange = { state.title = it.take(40) },
+            onValueChange = {
+                state.title = it.take(40)
+                state.followTitle()
+            },
             singleLine = true,
             cursorBrush = SolidColor(flavor.deep),
             textStyle = TextStyle(color = colors.text, fontSize = 22.sp, fontFamily = type.display, fontWeight = type.displayWeight),
@@ -402,7 +434,7 @@ fun JellyForm(
             initial = state.start ?: 9 * 60,
             onDismiss = { pickingTime = false },
             onPick = {
-                state.start = Planner.clampStart(it, state.duration)
+                state.setStartByHand(it)
                 pickingTime = false
             },
         )
@@ -755,12 +787,41 @@ private fun MiniMonth(selected: LocalDate, today: LocalDate, sundayFirst: Boolea
     }
 }
 
+/**
+ * The start, ten minutes at a time or picked on a clock. Under it: the words of the title a new
+ * jelly's time was taken from, or for an existing jelly the title's time in one tap.
+ */
 @Composable
 private fun TimeRow(state: EditorState, onPick: () -> Unit) {
+    Column {
+        TimeChips(state, onPick)
+        val colors = LocalJellyColors.current
+        val fromTitle = state.timeFromTitle
+        val said = if (state.isNew) null else TitleTime.find(state.title)
+        if (fromTitle != null) {
+            Text(
+                keepWords("시간을 제목의 ‘$fromTitle’에 맞췄어요."),
+                color = colors.textSub,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        } else if (said != null && said.minute != state.start) {
+            JellyChip(
+                "제목대로 ${hm(said.minute)}",
+                selected = false,
+                onClick = { state.setStartByHand(said.minute) },
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimeChips(state: EditorState, onPick: () -> Unit) {
     val colors = LocalJellyColors.current
     val start = state.start ?: 9 * 60
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        JellyChip("−10분", selected = false, onClick = { state.start = Planner.clampStart(start - 10, state.duration) })
+        JellyChip("−10분", selected = false, onClick = { state.setStartByHand(start - 10) })
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = colors.accent.copy(alpha = 0.12f),
@@ -774,7 +835,7 @@ private fun TimeRow(state: EditorState, onPick: () -> Unit) {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
-        JellyChip("+10분", selected = false, onClick = { state.start = Planner.clampStart(start + 10, state.duration) })
+        JellyChip("+10분", selected = false, onClick = { state.setStartByHand(start + 10) })
         Text("→ ${hm((start + state.duration).coerceAtMost(24 * 60))}", color = colors.textSub, fontSize = 13.sp)
     }
 }

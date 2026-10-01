@@ -77,6 +77,18 @@ function check(ok, what) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`);
   if (!ok) failures++;
 }
+
+// Times written in titles: the same sentences as the app's TitleTimeTest.
+{
+  const { titleTime } = await import(`${DOCS}share/titletime.js`);
+  const cases = JSON.parse(readFileSync(new URL('./titletime-cases.json', import.meta.url), 'utf8'));
+  const wrong = cases.filter(([title, minute, text]) => {
+    const said = titleTime(title);
+    return minute == null ? said != null : !said || said.minute !== minute || said.text !== text;
+  });
+  check(wrong.length === 0, `titles: ${cases.length - wrong.length}/${cases.length} times read as written${wrong.length ? ` (wrong: ${wrong.map((c) => c[0]).join(', ')})` : ''}`);
+}
+
 // Inside the app a browser dialog quietly answers "no", so the page must ask on the page itself.
 function noBrowserDialog(dialog) {
   check(false, `asks on the page, not with a browser dialog: ${dialog.message()}`);
@@ -173,6 +185,14 @@ try {
   await tid(a, 'day-add').click();
   const startsAt = await tid(a, 'time').inputValue();
   check(/^\d\d:\d\d$/.test(startsAt), `galaxy: a new jelly starts with a time, as in the app (${startsAt})`);
+  // A time written in the title becomes the time, and goes away with it.
+  await tid(a, 'title').fill('11시 미용실');
+  check(
+    (await tid(a, 'time').inputValue()) === '11:00' && (await tid(a, 'title-time').textContent()).includes('11시'),
+    'galaxy: "11시 미용실" sets the new jelly\'s time to 11:00',
+  );
+  await tid(a, 'title').fill('저녁 약속');
+  check((await tid(a, 'time').inputValue()) === startsAt, 'galaxy: without a time in the title, the time goes back');
   await tid(a, 'title').fill('저녁 약속');
   await tid(a, 'time').fill('19:00');
   await tid(a, 'post').click();
@@ -190,8 +210,11 @@ try {
   // 4. iPhone changes the time and the title, and leaves a memo.
   await sheetCards(b).first().click();
   await tid(b, 'title').fill('저녁 약속 (7시 반)');
-  await tid(b, 'time').fill('19:30');
-  await tid(b, 'time').dispatchEvent('change');
+  // An existing jelly is not moved on its own: the title's time is offered in one tap.
+  await tid(b, 'title-time-chip').waitFor();
+  check((await tid(b, 'title-time-chip').textContent()).includes('19:30'), 'iphone: a renamed jelly offers the time in its title (제목대로 19:30)');
+  await tid(b, 'title-time-chip').click();
+  check((await tid(b, 'time').inputValue()) === '19:30' && !(await tid(b, 'title-time-chip').count()), 'iphone: one tap sets it');
   await tid(b, 'memo-input').fill('역 앞 2번 출구에서 봐요');
   await tid(b, 'memo-send').click();
   await b.locator('.memo', { hasText: '2번 출구' }).waitFor();

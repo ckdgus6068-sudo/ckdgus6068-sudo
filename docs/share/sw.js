@@ -1,6 +1,6 @@
 // Keeps the page itself available offline. Pages are fetched from the network first, so a new
 // version shows up as soon as it is online; fonts and icons come from the cache first.
-const CACHE = 'jelly-share-v4';
+const CACHE = 'jelly-share-v5';
 // The other letterings are cached the first time they are picked.
 const SHELL = [
   './',
@@ -12,6 +12,7 @@ const SHELL = [
   'store.js',
   'crypto.js',
   'holidays.js',
+  'titletime.js',
   'config.js',
   'style.css',
   'privacy.html',

@@ -3,6 +3,7 @@ import { firebaseConfig, googleSignIn, publicUrl } from './config.js';
 import * as store from './store.js';
 import { JellyBox, GOLDEN_FLAVOR, setTitleFace } from './box.js';
 import { holidayOn } from './holidays.js';
+import { titleTime } from './titletime.js';
 import { cleanLook, lookName, lookSvg, LOOK_JOBS, sameLook } from './character.js';
 
 // ---------------------------------------------------------------- look
@@ -2177,6 +2178,15 @@ function buildJellySheet() {
   // An empty time field is a blank box on an iPhone: it says what it is for.
   const timeBox = h('label', { class: 'time-box' }, time, h('span', { class: 'time-empty', 'aria-hidden': 'true' }, '시간 정하기'));
   const noTime = h('button', { class: 'chip', type: 'button', 'data-testid': 'no-time' }, '시간 없음');
+  // A time written in the title ("11시 미용실"): a new jelly takes it until its time is set by hand,
+  // and an existing one offers it in one tap.
+  const titleHint = h('div', { class: 'title-time', 'data-testid': 'title-time' });
+  let timeTouched = false;
+  let fromTitle = null;
+  let startBeforeTitle = draft.start;
+  const showTime = (minute) => {
+    time.value = minute == null ? '' : hm(minute);
+  };
   const length = stretchLength(() => draft.duration, (m) => save({ duration: m }), () => save({}, true));
   const colorRow = h('div', { class: 'row' });
   const doneSwitch = h('span', { class: 'switch' });
@@ -2237,6 +2247,39 @@ function buildJellySheet() {
     noTime.classList.toggle('on', draft.start == null);
     timeBox.classList.toggle('blank', draft.start == null);
     doneSwitch.classList.toggle('on', !!draft.done);
+    const said = isNew ? null : titleTime(draft.title);
+    titleHint.replaceChildren(...[
+      fromTitle != null
+        ? h('small', { class: 'toggle-note' }, `시간을 제목의 ‘${fromTitle}’에 맞췄어요.`)
+        : said && said.minute !== draft.start
+          ? h('button', {
+              class: 'chip',
+              type: 'button',
+              'data-testid': 'title-time-chip',
+              onClick: () => {
+                timeTouched = true;
+                showTime(said.minute);
+                save({ start: said.minute }, true);
+              },
+            }, `제목대로 ${hm(said.minute)}`)
+          : null,
+    ].filter(Boolean));
+  }
+
+  /** A new jelly's time follows a time written in its title, until the time is set by hand. */
+  function followTitle() {
+    if (!isNew || timeTouched) return;
+    const said = titleTime(title.value);
+    if (said) {
+      if (fromTitle == null) startBeforeTitle = draft.start;
+      fromTitle = said.text;
+      showTime(said.minute);
+      save({ start: said.minute });
+    } else if (fromTitle != null) {
+      fromTitle = null;
+      showTime(startBeforeTitle);
+      save({ start: startBeforeTitle });
+    }
   }
 
   title.addEventListener('input', () => {
@@ -2247,6 +2290,7 @@ function buildJellySheet() {
       draft.title = '';
       paint();
     }
+    followTitle();
   });
   title.addEventListener('blur', () => {
     if (!isNew && !title.value.trim()) title.value = draft.title = existing.title;
@@ -2263,11 +2307,15 @@ function buildJellySheet() {
     if (!isNew) showDay(date.value);
   });
   time.addEventListener('change', () => {
+    timeTouched = true;
+    fromTitle = null;
     if (!time.value) return save({ start: null }, true);
     const [hh, mm] = time.value.split(':').map(Number);
     save({ start: hh * 60 + mm }, true);
   });
   noTime.addEventListener('click', () => {
+    timeTouched = true;
+    fromTitle = null;
     time.value = '';
     save({ start: null }, true);
   });
@@ -2291,6 +2339,7 @@ function buildJellySheet() {
     length.el,
     h('div', { class: 'field-label' }, '언제'),
     h('div', { class: 'row' }, date, timeBox, noTime),
+    titleHint,
     pinRow,
   ];
 
