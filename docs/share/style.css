@@ -1295,3 +1295,62 @@ body.fill #app {
   opacity: 0.45;
 }
 
+/* ---------- several calendars ---------- */
+
+.space-switch {
+  font: inherit;
+  color: var(--text-sub);
+  font-size: 13px;
+  padding: 0;
+  text-align: left;
+}
+
+.box-switch {
+  display: inline-block;
+  margin: -4px 0 8px 44px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line-strong);
+  font-weight: 700;
+}
+
+.sheet-sub {
+  color: var(--text-sub);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0 0 12px;
+  word-break: keep-all;
+}
+
+.group-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface-soft);
+  border: 1.5px solid transparent;
+  text-align: left;
+}
+
+.group-row.on {
+  border-color: var(--accent);
+}
+
+.group-name {
+  flex: 1;
+  font-family: var(--display);
+  font-weight: var(--display-weight);
+  font-size: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-people {
+  display: inline-flex;
+}
+

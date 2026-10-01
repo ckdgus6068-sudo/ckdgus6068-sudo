@@ -302,6 +302,37 @@ try {
   await shot(b, '10b-iphone-golden');
   await b.goBack();
 
+  // 7b. A second calendar on the Galaxy ("재훈·준헌"): each calendar shows only its own jellies.
+  await tid(a, 'view-month').click();
+  await tid(a, 'menu').click();
+  await tid(a, 'menu-groups').click();
+  await tid(a, 'new-group').click();
+  await tid(a, 'group-name').fill('재훈·준헌');
+  await tid(a, 'group-create').click();
+  await a.waitForFunction(() => document.querySelector('[data-testid="groups"]')?.textContent.includes('재훈·준헌'));
+  check(true, 'galaxy: makes a second shared calendar');
+  await a.locator(`[data-day="${month}-17"]`).click();
+  await tid(a, 'add').click();
+  await tid(a, 'title').fill('축구');
+  await tid(a, 'time').fill('18:00');
+  await tid(a, 'post').click();
+  await tid(a, 'memos').waitFor();
+  await a.goBack();
+  const only = await a.waitForFunction(
+    (sel) => document.querySelectorAll(sel).length === 1 && document.querySelector(sel).textContent.includes('축구'),
+    `[data-day="${month}-17"] .mini`,
+    { timeout: 10000 },
+  ).then(() => true, () => false);
+  const cellText = await a.locator(`[data-day="${month}-17"]`).textContent();
+  check(only, `galaxy: the new calendar holds only its own jellies (${cellText.trim()})`);
+  await tid(a, 'groups').click();
+  await tid(a, 'group-list').waitFor();
+  check((await tid(a, 'group-list').locator('.group-row').count()) === 2, 'galaxy: both calendars are listed');
+  await shot(a, '10c-galaxy-groups');
+  await tid(a, 'group-list').locator('.group-row').first().click();
+  await a.waitForFunction(() => document.querySelector('[data-testid="groups"]')?.textContent.includes('공유 젤리 달력'));
+  check((await a.locator(`[data-day="${month}-17"] .mini`).count()) === 1, 'galaxy: back on the first calendar');
+
   // 8. Inside the app's "모두" tab: the phone's own jellies and the shared ones in one box.
   const app = await galaxy.newPage();
   app.on('pageerror', (e) => console.error('[app] page error', e));
@@ -342,9 +373,10 @@ try {
   );
   await app.goto(BASE);
   await tid(app, 'legend').waitFor();
-  await settled(app, 4);
+  await settled(app, 5);
   const legend = await tid(app, 'legend').textContent();
-  check(legend.includes('내 젤리 2') && legend.includes('공유 젤리 2'), 'all: my two jellies and two shared ones in one box');
+  check(legend.includes('내 젤리 2') && legend.includes('공유 젤리 3') && legend.includes('달력 2개'),
+    `all: my two jellies and the shared ones of both calendars in one box (${legend.trim()})`);
   await app.waitForTimeout(600);
   await shot(app, '11-galaxy-all');
 
@@ -354,7 +386,7 @@ try {
   await called(app, 'openPersonal', 'p1');
   check(true, 'all: a tap on my own jelly opens it in the app');
 
-  await settled(app, 4);
+  await settled(app, 5);
   blobs = await box(app);
   const report = blobs.find((c) => c.title === '보고서 작성');
   await app.mouse.dblclick(report.x, report.y);
@@ -362,7 +394,7 @@ try {
   check(true, 'all: a double tap on my own jelly finishes it in the app');
 
   // Inside the app the app keeps the golden code: the page hands the find over.
-  await settled(app, 4);
+  await settled(app, 5);
   await grab(app, '헬스', 50);
   await called(app, 'foundGolden', 'p1');
   check(!(await tid(app, 'golden').count()), 'all: a golden find inside the app is the app\'s to announce');
@@ -379,21 +411,28 @@ try {
   await tid(app, 'grid').waitFor();
   const mine17 = await app.locator(`[data-day="${month}-17"] .mini.mine`).count();
   const shared17 = await app.locator(`[data-day="${month}-17"] .mini:not(.mine)`).count();
-  check(mine17 === 1 && shared17 >= 1, `all: the month shows my unfinished jelly and the shared ones (${mine17} + ${shared17})`);
+  check(mine17 === 1 && shared17 === 2, `all: the month shows my unfinished jelly and both calendars' (${mine17} + ${shared17})`);
   await shot(app, '11b-galaxy-all-month');
   await app.locator(`[data-day="${month}-24"]`).click();
   await called(app, 'showDay', `${month}-24`);
   check(true, 'all: a tapped day goes to the app');
   await tid(app, 'view-box').click();
-  await settled(app, 4);
+  await settled(app, 5);
 
-  await settled(app, 4);
+  await settled(app, 5);
   blobs = await box(app);
   const shared = blobs.find((c) => c.title === '부모님 생신');
   await app.mouse.click(shared.x, shared.y);
   await tid(app, 'memos').waitFor();
   check(true, 'all: a tap on a shared jelly opens it with its memos');
   check(await tid(app, 'alarm').isDisabled(), 'all: the clock alarm waits for a jelly with a time in the coming day');
+  await app.goBack();
+  await settled(app, 5);
+  blobs = await box(app);
+  const football = blobs.find((c) => c.title === '축구');
+  await app.mouse.click(football.x, football.y);
+  await tid(app, 'memos').waitFor();
+  check((await app.locator('.sheet-kicker').textContent()).includes('재훈·준헌'), 'all: a jelly of the other calendar opens in its calendar');
   await app.goBack();
 
   const room = await tid(app, 'box').boundingBox();

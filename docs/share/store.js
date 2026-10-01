@@ -211,6 +211,11 @@ export async function joinWithCode(code, profile) {
   return { spaceId, key: inside.key };
 }
 
+/** Gives the calendar a new name (sealed like everything else); any member may. */
+export async function renameSpace(spaceId, spaceName) {
+  return updateDoc(doc(db, 'spaces', spaceId), { meta: await seal(keyOf(spaceId), { name: spaceName }, spaceAt(spaceId)) });
+}
+
 /** Makes an invite code for the calendar, valid for a few days and usable by several people. */
 export async function makeInvite(spaceId) {
   const code = randomString(CODE_LENGTH, CODE_ALPHABET);
