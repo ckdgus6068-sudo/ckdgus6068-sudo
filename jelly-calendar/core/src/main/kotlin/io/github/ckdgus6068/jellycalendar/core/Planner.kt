@@ -80,6 +80,15 @@ object Planner {
     fun canPin(data: AppData, date: LocalDate, jellyId: String? = null): Boolean =
         pinnedOn(data, date).count { it.id != jellyId } < MAX_PINNED
 
+    /** Whether [duration] minutes from [start] on [date] are clear of the other jellies of that day. */
+    fun isFree(data: AppData, date: LocalDate, start: Int, duration: Int, excludeId: String? = null): Boolean =
+        start >= 0 && start + duration <= MINUTES_PER_DAY &&
+            scheduledOn(data, date).none { j ->
+                val s = j.startMin
+                j.id != excludeId && j.status != JellyStatus.MISSED && s != null &&
+                    s < start + duration && start < s + j.durationMin
+            }
+
     /**
      * Start times that suit a jelly of [duration] minutes on [date]: the first free gap at or after
      * [from], then later ones at least two hours apart, up to [count]. Used when a jelly comes out of

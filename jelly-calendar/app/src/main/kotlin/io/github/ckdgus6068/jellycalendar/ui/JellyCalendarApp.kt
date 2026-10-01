@@ -41,6 +41,7 @@ import io.github.ckdgus6068.jellycalendar.core.Routine
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarActions
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarScreen
+import io.github.ckdgus6068.jellycalendar.ui.calendar.PlaceSheet
 import io.github.ckdgus6068.jellycalendar.ui.calendar.Space
 import io.github.ckdgus6068.jellycalendar.ui.calendar.ViewMode
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
@@ -49,6 +50,7 @@ import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
 import io.github.ckdgus6068.jellycalendar.ui.editor.EditorKind
 import io.github.ckdgus6068.jellycalendar.ui.editor.EditorState
 import io.github.ckdgus6068.jellycalendar.ui.editor.JellyForm
+import io.github.ckdgus6068.jellycalendar.ui.editor.TimePickDialog
 import io.github.ckdgus6068.jellycalendar.ui.egg.GoldenDialog
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalIdleWobble
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalJellyClock
@@ -117,6 +119,8 @@ fun JellyCalendarApp(
     val weekScroll = rememberScrollState()
     val dayScroll = rememberScrollState()
     var editor by remember { mutableStateOf<EditorState?>(null) }
+    var placing by remember { mutableStateOf<Placing?>(null) }
+    var placingOther by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<EditorState?>(null) }
     var pendingImport by remember { mutableStateOf<AppData?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -166,15 +170,12 @@ fun JellyCalendarApp(
             when (target) {
                 is DropTarget.Slot -> store.move(jelly.id, target.date, target.startMin)
                 is DropTarget.Day -> {
-                    val start = jelly.startMin ?: Planner.findFreeSlot(
-                        store.current,
-                        target.date,
-                        jelly.durationMin,
-                        defaultStart(target.date),
-                        jelly.id,
-                    )
-                    // Moving to a day that is not on screen is announced, with a way back.
-                    if (mode != ViewMode.WEEK && target.date != selected) {
+                    val start = jelly.startMin
+                    if (start == null) {
+                        // Out of the tray onto a day: the person picks the time, the app only suggests.
+                        placing = Placing(jelly, target.date)
+                    } else if (mode != ViewMode.WEEK && target.date != selected) {
+                        // Moving to a day that is not on screen is announced, with a way back.
                         store.moveUndoable(jelly.id, target.date, start)
                         notify("‘${jelly.title}’ 젤리를 ${dateTitle(target.date)}로 옮겼어요", undo = true)
                     } else {
@@ -187,6 +188,13 @@ fun JellyCalendarApp(
                 }
             }
         }
+    }
+
+    fun place(p: Placing, start: Int) {
+        store.moveUndoable(p.jelly.id, p.date, start)
+        placing = null
+        placingOther = false
+        notify("‘${p.jelly.title}’ 젤리를 ${dateTitle(p.date)} ${hm(start)}에 넣었어요", undo = true)
     }
 
     fun saveEditor(e: EditorState) {
@@ -532,6 +540,38 @@ fun JellyCalendarApp(
                 }
             }
 
+            placing?.let { p ->
+                val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                val original = p.jelly.missedFromStart?.let { Planner.clampStart(it, p.jelly.durationMin) }
+                val suggestions = remember(p, data) {
+                    Planner.freeSlots(data, p.date, p.jelly.durationMin, defaultStart(p.date), p.jelly.id).filter { it != original }
+                }
+                ModalBottomSheet(
+                    onDismissRequest = { placing = null },
+                    sheetState = sheetState,
+                    containerColor = colors.surface,
+                ) {
+                    PlaceSheet(
+                        jelly = p.jelly,
+                        date = p.date,
+                        original = original,
+                        originalFree = original != null && Planner.isFree(data, p.date, original, p.jelly.durationMin, p.jelly.id),
+                        suggestions = suggestions,
+                        onPick = { place(p, it) },
+                        onPickOther = { placingOther = true },
+                        onKeep = { placing = null },
+                    )
+                }
+                if (placingOther) {
+                    TimePickDialog(
+                        initial = original ?: suggestions.firstOrNull() ?: defaultStart(p.date),
+                        onDismiss = { placingOther = false },
+                        onPick = { place(p, Planner.clampStart(it, p.jelly.durationMin)) },
+                        title = "몇 시에 넣을까요?",
+                    )
+                }
+            }
+
             // The golden jelly: a big surprise the first time, a wink after that.
             LaunchedEffect(goldenNews) {
                 val news = goldenNews ?: return@LaunchedEffect
@@ -594,3 +634,7 @@ fun JellyCalendarApp(
         }
     }
 }
+
+/** A jelly from the tray dropped on [date], waiting for the person to say when. */
+private class Placing(val jelly: Jelly, val date: LocalDate)
+

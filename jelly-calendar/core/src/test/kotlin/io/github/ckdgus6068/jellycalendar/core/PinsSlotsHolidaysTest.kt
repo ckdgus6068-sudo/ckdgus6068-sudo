@@ -92,4 +92,22 @@ class PinsSlotsHolidaysTest {
         assertEquals("대체휴일", KoreanHolidays.on(LocalDate.of(2026, 10, 5))?.short)
         assertNull(KoreanHolidays.on(LocalDate.of(2026, 10, 7)))
     }
+
+    @Test
+    fun isFreeChecksOverlapsOnly() {
+        val day = LocalDate.of(2026, 10, 3)
+        val data = AppData(
+            jellies = listOf(
+                Jelly(id = "a", title = "a", durationMin = 60, date = day, startMin = 10 * 60),
+                Jelly(id = "b", title = "b", durationMin = 30, date = day, startMin = 14 * 60, status = JellyStatus.MISSED),
+            ),
+        )
+        assertTrue(Planner.isFree(data, day, 9 * 60, 60))
+        assertFalse(Planner.isFree(data, day, 9 * 60 + 30, 60))
+        assertTrue(Planner.isFree(data, day, 11 * 60, 30))
+        // A missed jelly does not hold its time, and a jelly does not get in its own way.
+        assertTrue(Planner.isFree(data, day, 14 * 60, 30))
+        assertTrue(Planner.isFree(data, day, 10 * 60, 60, excludeId = "a"))
+        assertFalse(Planner.isFree(data, day, 23 * 60 + 30, 60))
+    }
 }
