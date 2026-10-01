@@ -231,7 +231,8 @@ fun JellyBoxBoard(
                 }
                 var spawnY = -40f
                 ordered.forEachIndexed { index, jelly ->
-                    val area = (wanted[jelly.id] ?: 0f) * scale
+                    // A very long jelly still has to fit across the box.
+                    val area = ((wanted[jelly.id] ?: 0f) * scale).coerceAtMost(0.7f * w * w)
                     val blob = world.blobs[jelly.id]
                     if (blob == null) {
                         val r = sqrt(area / PI.toFloat())

@@ -1,7 +1,8 @@
 // 공유 젤리: a month of jellies shared by two (or a few) people, on iPhone, Android or any browser.
 import { firebaseConfig, publicUrl } from './config.js';
 import * as store from './store.js';
-import { JellyBox, setTitleFace } from './box.js';
+import { JellyBox, GOLDEN_FLAVOR, setTitleFace } from './box.js';
+import { holidayOn } from './holidays.js';
 
 // ---------------------------------------------------------------- look
 
@@ -26,7 +27,11 @@ const FONTS = [
   { id: 'ROUND', name: '통통', family: '"Bagel Fat One", "Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 900 },
   { id: 'SYSTEM', name: '휴대폰 글꼴', family: 'system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif', weight: 800 },
 ];
-const DURATIONS = [30, 60, 90, 120, 180, 240];
+// Lengths: 10-minute steps up to two hours, then 30-minute steps up to twelve (as in the app).
+const SHORT_MAX = 120;
+const MAX_DURATION = 720;
+const MAX_PINNED = 3;
+const LENGTH_TICKS = [[30, '30분'], [60, '1시간'], [120, '2시간'], [360, '6시간'], [720, '12시간']];
 
 // The hidden golden jelly, as in the app (GoldenJelly.kt): grab one jelly in the box and let it go
 // 50 times without a break. Who finders are sent to is written here and in the app (GoldenDialog.kt).
@@ -85,6 +90,10 @@ const state = {
   selected: todayIso(),
   // The shared calendar as a month ('month') or as one day's box ('box').
   view: saved.get('view') === 'box' ? 'box' : 'month',
+  // The same choice in the app's "모두" tab, kept apart (it starts as the box).
+  allView: saved.get('allView') === 'month' ? 'month' : 'box',
+  // Finished jellies of the day are folded away until asked for.
+  showDone: false,
   // Set by the Android app: { mode: 'shared' } or { mode: 'all', date, personal, doubleTap, longPress }.
   host: null,
   sheet: null, // { kind: 'jelly' | 'new' | 'add' | 'invite' | 'menu' | 'name' | 'golden', ... }
@@ -128,11 +137,20 @@ function addDays(d, n) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 }
 
-/** Six Monday-to-Sunday weeks covering the month. */
+/** Weeks start on Sunday, as Korean wall calendars do, unless the app is set to Monday. */
+function sundayFirst() {
+  return state.host ? state.host.sundayFirst !== false : true;
+}
+
+/** Six weeks covering the month. */
 function gridDays(month) {
-  const offset = (month.getDay() + 6) % 7;
+  const offset = sundayFirst() ? month.getDay() : (month.getDay() + 6) % 7;
   const start = addDays(month, -offset);
   return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+}
+
+function weekdayNames() {
+  return sundayFirst() ? ['일', ...DAY_NAMES.slice(0, 6)] : DAY_NAMES;
 }
 
 function dayName(d) {
@@ -189,8 +207,10 @@ function h(tag, attrs, ...children) {
   return el;
 }
 
+const GOLD = { name: '황금', light: '#FFF3C4', base: '#FFD24D', deep: '#D99A00', ink: '#5C3B00' };
+
 function flavorVars(i) {
-  const f = FLAVORS[((i % FLAVORS.length) + FLAVORS.length) % FLAVORS.length];
+  const f = i === GOLDEN_FLAVOR ? GOLD : FLAVORS[((i % FLAVORS.length) + FLAVORS.length) % FLAVORS.length];
   return { light: f.light, base: f.base, deep: f.deep, ink: f.ink };
 }
 
@@ -604,16 +624,53 @@ function shiftMonth(delta) {
 }
 
 function goToday() {
+  if (isAll()) {
+    bridge?.showDay?.(todayIso());
+    return;
+  }
   state.month = firstOfMonth(new Date());
   state.selected = todayIso();
   render();
 }
 
+/** "달력" or "상자": the shared tab and the app's "모두" tab each remember their own. */
+function currentView() {
+  return isAll() ? state.allView : state.view;
+}
+
 function setView(view) {
-  if (state.view === view) return;
-  state.view = view;
-  saved.set('view', view);
+  if (currentView() === view) return;
+  if (isAll()) {
+    state.allView = view;
+    saved.set('allView', view);
+  } else {
+    state.view = view;
+    saved.set('view', view);
+  }
   render();
+}
+
+/** The day the page is about: picked here, or the app's day in the "모두" tab. */
+function selectedDay() {
+  return isAll() ? state.host.date : state.selected;
+}
+
+/** The phone's own jellies the app handed over (the six weeks around its day). */
+function hostPersonal() {
+  return (Array.isArray(state.host?.personal) ? state.host.personal : []).filter((p) => p && p.id && p.title != null);
+}
+
+/** Everything on [iso] as one list: the phone's own jellies (in "모두") and the shared ones. */
+function dayItems(iso) {
+  const mine = isAll() ? hostPersonal().filter((p) => !p.date || p.date === iso).map((p) => ({
+    kind: 'personal', id: p.id, title: p.title, flavor: p.flavor ?? 0, done: !!p.done, pinned: !!p.pinned,
+    start: p.start ?? null, duration: p.duration || 30, p,
+  })) : [];
+  const shared = usable() ? jelliesOn(iso).map((j) => ({
+    kind: 'shared', id: j.id, title: j.title, flavor: j.flavor, done: !!j.done, pinned: !!j.pinned,
+    start: j.start ?? null, duration: j.duration, j,
+  })) : [];
+  return [...mine, ...shared].sort((a, b) => (b.pinned - a.pinned) || (a.start ?? 2000) - (b.start ?? 2000));
 }
 
 function jelliesOn(iso) {
@@ -628,7 +685,8 @@ function jelliesOn(iso) {
 function render() {
   if (!ready) return;
   if (isAll()) {
-    renderAll();
+    if (state.allView === 'month') renderMonth();
+    else renderAll();
     return;
   }
   if (!state.spaceId) {
@@ -693,21 +751,37 @@ function header({ title, sub, testid, prev, next, prevLabel, nextLabel }) {
       h('div', { class: 'month-title', 'data-testid': testid }, title),
       h('div', { class: 'space-name' }, sub)),
     h('button', { class: 'icon-btn', 'aria-label': nextLabel, onClick: next }, '›'),
-    membersButton());
+    usable() ? membersButton() : null);
 }
 
-/** "달력 | 상자" and the way back to today. */
-function viewBar() {
-  const tab = (view, label) => h('button', {
-    class: `seg-btn${state.view === view ? ' on' : ''}`,
+/**
+ * The bar at the bottom of every screen, as in the app: back to today on the left, 달력 or 상자 in
+ * the middle, and + on the right.
+ */
+function bottomBar() {
+  const view = currentView();
+  const tab = (v, label) => h('button', {
+    class: `seg-btn${view === v ? ' on' : ''}`,
     role: 'tab',
-    'aria-selected': state.view === view ? 'true' : 'false',
-    onClick: () => setView(view),
-    'data-testid': `view-${view}`,
+    'aria-selected': view === v ? 'true' : 'false',
+    onClick: () => setView(v),
+    'data-testid': `view-${v}`,
   }, label);
-  return h('div', { class: 'view-bar' },
+  return h('nav', { class: 'bottom-bar', 'data-testid': 'bottom-bar' },
+    h('button', { class: 'today-btn squish', onClick: goToday, 'data-testid': 'today', 'aria-label': '오늘로' },
+      h('span', { class: 'today-leaf' }, String(new Date().getDate())),
+      h('span', null, '오늘')),
     h('div', { class: 'seg', role: 'tablist' }, tab('month', '달력'), tab('box', '상자')),
-    h('button', { class: 'chip', onClick: goToday }, '오늘'));
+    h('button', { class: 'jelly add-fab squish', vars: flavorVars(0), 'aria-label': '젤리 올리기', onClick: addJelly, 'data-testid': 'add' }, '+'));
+}
+
+/** "+": a shared jelly on the day shown; in "모두", first the choice between mine and shared. */
+function addJelly() {
+  const date = selectedDay();
+  if (!date) return;
+  if (!isAll()) openSheet({ kind: 'new', date });
+  else if (usable()) openSheet({ kind: 'add', date });
+  else bridge?.createPersonal?.(date);
 }
 
 function offlineBanner() {
@@ -721,78 +795,142 @@ function leaveBox() {
   if (testMode) window.__jellyBox = null;
 }
 
+/** A month of jellies: the shared ones, and in the app's "모두" tab the phone's own as well. */
 function renderMonth() {
   leaveBox();
-  screen = 'month';
+  const all = isAll();
+  screen = all ? 'all-month' : 'month';
   document.body.classList.remove('fill');
-  const month = state.month;
+  document.body.classList.add('has-bar');
+  const selected = selectedDay();
+  const month = all ? firstOfMonth(parseDay(selected)) : state.month;
   const today = todayIso();
+  // In "모두" the app owns the day: the page asks it to move.
+  const pick = (iso) => {
+    if (all) {
+      bridge?.showDay?.(iso);
+      return;
+    }
+    const d = parseDay(iso);
+    state.selected = iso;
+    if (d.getMonth() !== month.getMonth()) shiftMonth(d < month ? -1 : 1);
+    else render();
+  };
+  const moveMonth = (delta) => {
+    if (!all) {
+      shiftMonth(delta);
+      return;
+    }
+    const d = parseDay(selected);
+    const target = new Date(d.getFullYear(), d.getMonth() + delta, 1);
+    const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    pick(isoDay(new Date(target.getFullYear(), target.getMonth(), Math.min(d.getDate(), last))));
+  };
 
   const top = header({
     title: `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
-    sub: state.space?.name || '공유 젤리 달력',
+    sub: all ? '내 젤리와 공유 젤리' : state.space?.name || '공유 젤리 달력',
     testid: 'month',
-    prev: () => shiftMonth(-1),
-    next: () => shiftMonth(1),
+    prev: () => moveMonth(-1),
+    next: () => moveMonth(1),
     prevLabel: '이전 달',
     nextLabel: '다음 달',
   });
 
+  const names = weekdayNames();
   const weekdays = h('div', { class: 'weekdays' },
-    DAY_NAMES.map((n, i) => h('div', { class: i === 5 ? 'sat' : i === 6 ? 'sun' : '' }, n)));
+    names.map((n) => h('div', { class: n === '토' ? 'sat' : n === '일' ? 'sun' : '' }, n)));
 
   const grid = h('div', { class: 'grid', 'data-testid': 'grid' },
     gridDays(month).map((d) => {
       const iso = isoDay(d);
-      const list = jelliesOn(iso);
-      const weekday = (d.getDay() + 6) % 7;
-      const shown = list.slice(0, 2);
+      // Finished jellies leave the grid; the day below still lists them.
+      const open = dayItems(iso).filter((it) => !it.done);
+      const shown = open.slice(0, 3);
+      const rest = open.length - shown.length;
+      const holiday = holidayOn(iso);
+      const tone = holiday || d.getDay() === 0 ? ' sun' : d.getDay() === 6 ? ' sat' : '';
       return h('button', {
-        class: ['day', d.getMonth() !== month.getMonth() && 'other', iso === today && 'today', iso === state.selected && 'selected']
+        class: ['day', d.getMonth() !== month.getMonth() && 'other', iso === today && 'today', iso === selected && 'selected']
           .filter(Boolean).join(' '),
         'data-day': iso,
-        onClick: () => {
-          state.selected = iso;
-          if (d.getMonth() !== month.getMonth()) shiftMonth(d < month ? -1 : 1);
-          else render();
-        },
+        onClick: () => pick(iso),
       },
-        h('span', { class: `num${weekday === 5 ? ' sat' : weekday === 6 ? ' sun' : ''}` }, d.getDate()),
-        shown.map((j) => h('span', {
-          class: `jelly mini${j.done ? ' done' : ''}`,
-          vars: { ...flavorVars(j.flavor), who: memberColor(j.by) },
-        }, j.title)),
-        list.length > shown.length ? h('span', { class: 'more' }, `+${list.length - shown.length}`) : null,
+        h('span', { class: 'day-top' },
+          h('span', { class: `num${tone}` }, d.getDate()),
+          rest > 0
+            ? h('span', { class: 'more' }, `+${rest}`)
+            : holiday ? h('span', { class: 'hol' }, holiday.short) : null),
+        shown.map((it) => h('span', {
+          class: `jelly mini${it.pinned ? ' pinned' : ''}${it.kind === 'personal' ? ' mine' : ''}`,
+          vars: { ...flavorVars(it.flavor), who: it.kind === 'shared' ? memberColor(it.j.by) : 'transparent' },
+        }, it.title)),
       );
     }));
-  addSwipe(grid);
-
-  const list = jelliesOn(state.selected);
-  const panel = h('div', { class: 'day-panel' },
-    h('div', { class: 'day-head' },
-      h('div', null,
-        h('div', { class: 'day-title', 'data-testid': 'day-title' }, dayTitle(state.selected)),
-        h('div', { class: 'day-count' }, list.length ? `공유 젤리 ${list.length}개` : '아직 비어 있어요')),
-      h('button', {
-        class: 'jelly add-btn squish',
-        vars: flavorVars(0),
-        onClick: () => openSheet({ kind: 'new', date: state.selected }),
-        'data-testid': 'add',
-      }, '+ 올리기')),
-    list.length
-      ? h('div', { class: 'cards' }, list.map((j, i) => card(j, i)))
-      : h('div', { class: 'empty' }, '이 날에 같이 할 일을 ‘+ 올리기’로 올려 보세요. 올린 젤리는 함께 쓰는 사람 화면에도 바로 나타나요.'),
-  );
+  addSwipe(grid, moveMonth);
 
   appEl().replaceChildren(...[
     top,
-    viewBar(),
     weekdays,
     grid,
     offlineBanner(),
-    panel,
+    dayPanel(selected),
     installHint(),
+    bottomBar(),
   ].filter(Boolean));
+}
+
+/** The picked day under the month: its jellies to do, and the finished ones folded away. */
+function dayPanel(iso) {
+  const items = dayItems(iso);
+  const open = items.filter((it) => !it.done);
+  const done = items.filter((it) => it.done);
+  const holiday = holidayOn(iso);
+  const count = open.length || done.length
+    ? `할 젤리 ${open.length}개${done.length ? ` · 다 먹은 젤리 ${done.length}개` : ''}`
+    : '아직 비어 있어요';
+  const toCard = (it, i) => (it.kind === 'shared' ? card(it.j, i) : personalCard(it.p, i));
+  return h('div', { class: 'day-panel' },
+    h('div', { class: 'day-head' },
+      h('div', null,
+        h('div', { class: 'day-title', 'data-testid': 'day-title' },
+          dayTitle(iso),
+          iso === todayIso() ? h('span', { class: 'tag today-tag' }, '오늘') : null,
+          holiday ? h('span', { class: 'tag holiday-tag' }, holiday.name) : null),
+        h('div', { class: 'day-count' }, count))),
+    open.length
+      ? h('div', { class: 'cards' }, open.map(toCard))
+      : h('div', { class: 'empty' }, done.length
+        ? '이 날 젤리를 다 먹었어요. 잘했어요!'
+        : '이 날은 아직 말랑하게 비어 있어요. 아래 ＋ 로 젤리를 올려 보세요.'),
+    done.length
+      ? h('button', {
+          class: 'done-fold',
+          'data-testid': 'done-fold',
+          'aria-expanded': String(state.showDone),
+          onClick: () => {
+            state.showDone = !state.showDone;
+            render();
+          },
+        }, `다 먹은 젤리 ${done.length}개 ${state.showDone ? '▴' : '▾'}`)
+      : null,
+    done.length && state.showDone ? h('div', { class: 'cards done-cards' }, done.map(toCard)) : null,
+  );
+}
+
+/** One of the phone's own jellies in the "모두" tab: the app opens it. */
+function personalCard(p, i) {
+  return h('button', {
+    class: `jelly card squish${p.done ? ' done' : ''}`,
+    vars: flavorVars(p.flavor ?? 0),
+    style: { animationDelay: `${-(i * 0.7)}s` },
+    onClick: () => bridge?.openPersonal?.(p.id),
+    'data-testid': 'personal-card',
+  },
+    h('div', { class: 'title' }, `${p.pinned ? '📌 ' : ''}${p.done ? '✓ ' : ''}${p.title}`),
+    h('div', { class: 'meta' },
+      h('span', null, timeText({ start: p.start ?? null, duration: p.duration || 30 })),
+      h('span', { class: 'badge' }, '내 젤리')));
 }
 
 function card(j, i) {
@@ -804,7 +942,7 @@ function card(j, i) {
     onClick: () => openSheet({ kind: 'jelly', id: j.id }),
     'data-testid': 'card',
   },
-    h('div', { class: 'title' }, j.done ? `✓ ${j.title}` : j.title),
+    h('div', { class: 'title' }, `${j.pinned ? '📌 ' : ''}${j.done ? '✓ ' : ''}${j.title}`),
     h('div', { class: 'meta' },
       h('span', null, timeText(j)),
       h('span', { class: 'badge' }, avatar(j.by, j.byName, true), `${subject(j.by, j.byName)} 올림`),
@@ -815,7 +953,7 @@ function card(j, i) {
   );
 }
 
-function addSwipe(el) {
+function addSwipe(el, move = shiftMonth) {
   let x0 = null;
   let y0 = null;
   el.addEventListener('touchstart', (e) => {
@@ -827,7 +965,7 @@ function addSwipe(el) {
     const dx = e.changedTouches[0].clientX - x0;
     const dy = e.changedTouches[0].clientY - y0;
     x0 = null;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) shiftMonth(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) move(dx < 0 ? 1 : -1);
   });
 }
 
@@ -852,20 +990,19 @@ function installHint() {
 // only the text around it is drawn again.
 let boxView = null;
 
-function useBoxView(kind, onAdd, onSwipe) {
+function useBoxView(kind, onSwipe) {
   if (boxView?.kind === kind && screen === kind && boxView.frame.isConnected) return boxView;
   leaveBox();
   const inner = h('div', { class: 'box-inner', 'data-testid': 'box' });
-  const frame = h('div', { class: 'box-frame' },
-    inner,
-    h('button', { class: 'jelly box-add squish', vars: flavorVars(0), 'aria-label': '젤리 올리기', onClick: onAdd, 'data-testid': 'box-add' }, '+'));
+  const frame = h('div', { class: 'box-frame' }, inner);
   const top = h('div', { class: 'box-top' });
   const note = h('div', { class: 'box-note' });
-  appEl().replaceChildren(top, note, frame);
-  document.body.classList.add('fill');
+  const bar = h('div', { class: 'box-bar' });
+  appEl().replaceChildren(top, note, frame, bar);
+  document.body.classList.add('fill', 'has-bar');
   screen = kind;
   const box = new JellyBox(inner, { onOpen: openItem, onToggle: toggleItem, onSwipe, onGrab: grabItem });
-  boxView = { kind, top, note, frame, box };
+  boxView = { kind, top, note, frame, bar, box };
   if (testMode) window.__jellyBox = box;
   return boxView;
 }
@@ -884,6 +1021,7 @@ function sharedItem(j) {
     done: !!j.done,
     badge: { text: initial(realName(j.by, j.byName)), color: memberColor(j.by), ink: memberInk(j.by) },
     gold: state.goldenKeys.has(`s:${j.id}`),
+    pinned: !!j.pinned,
     ref: { kind: 'shared', id: j.id },
   };
 }
@@ -897,6 +1035,7 @@ function personalItem(p) {
     flavor: p.flavor ?? 0,
     done: !!p.done,
     badge: null,
+    pinned: !!p.pinned,
     ref: { kind: 'personal', id: p.id },
   };
 }
@@ -1003,48 +1142,50 @@ function toggleItem(item) {
 }
 
 function renderSharedBox() {
-  const v = useBoxView(
-    'shared-box',
-    () => openSheet({ kind: 'new', date: state.selected }),
-    (dir) => showDay(isoDay(addDays(parseDay(state.selected), dir))),
-  );
+  const v = useBoxView('shared-box', (dir) => showDay(isoDay(addDays(parseDay(state.selected), dir))));
   const list = jelliesOn(state.selected);
-  const isToday = state.selected === todayIso();
+  const open = list.filter((j) => !j.done).length;
+  const holiday = holidayOn(state.selected);
   v.top.replaceChildren(
     header({
       title: dayTitle(state.selected),
-      sub: `${isToday ? '오늘 · ' : ''}${list.length ? `공유 젤리 ${list.length}개` : '아직 비어 있어요'}`,
+      sub: [
+        state.selected === todayIso() ? '오늘' : null,
+        holiday?.name,
+        list.length ? `공유 젤리 ${list.length}개${open < list.length ? ` · 다 먹음 ${list.length - open}` : ''}` : '아직 비어 있어요',
+      ].filter(Boolean).join(' · '),
       testid: 'day-head',
       prev: () => showDay(isoDay(addDays(parseDay(state.selected), -1))),
       next: () => showDay(isoDay(addDays(parseDay(state.selected), 1))),
       prevLabel: '전날',
       nextLabel: '다음 날',
     }),
-    viewBar(),
   );
   v.note.replaceChildren(...[offlineBanner()].filter(Boolean));
+  v.bar.replaceChildren(bottomBar());
   v.box.setOptions(gestures());
-  v.box.setEmpty('이 날은 비어 있어요', '오른쪽 위 + 버튼으로 같이 할 일을 올려 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
+  v.box.setEmpty('이 날은 비어 있어요', '아래 ＋ 로 같이 할 일을 올려 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
   v.box.set(list.map(sharedItem));
 }
 
 /** The app's "모두" tab: the phone's own jellies of the day and the shared ones, in one box. */
 function renderAll() {
   const host = state.host;
-  const v = useBoxView(
-    'all',
-    () => {
-      // The box outlives day changes, so the day is read when the button is pressed.
-      const date = state.host?.date;
-      if (!date) return;
-      if (usable()) openSheet({ kind: 'add', date });
-      else bridge?.createPersonal?.(date);
-    },
-    (dir) => bridge?.shiftDay?.(dir),
-  );
-  const personal = (Array.isArray(host.personal) ? host.personal : []).filter((p) => p && p.id && p.title != null);
+  const v = useBoxView('all', (dir) => bridge?.shiftDay?.(dir));
+  // The app hands over six weeks of my jellies; the box holds the day's.
+  const personal = hostPersonal().filter((p) => !p.date || p.date === host.date);
   const shared = usable() ? jelliesOn(host.date) : [];
+  const holiday = holidayOn(host.date);
   v.top.replaceChildren(
+    header({
+      title: dayTitle(host.date),
+      sub: [host.date === todayIso() ? '오늘' : null, holiday?.name, '내 젤리와 공유 젤리'].filter(Boolean).join(' · '),
+      testid: 'all-day',
+      prev: () => bridge?.shiftDay?.(-1),
+      next: () => bridge?.shiftDay?.(1),
+      prevLabel: '전날',
+      nextLabel: '다음 날',
+    }),
     h('div', { class: 'legend', 'data-testid': 'legend' },
       h('span', { class: 'legend-item' }, h('span', { class: 'legend-mine' }), `내 젤리 ${personal.length}`),
       h('span', { class: 'legend-item' },
@@ -1064,8 +1205,9 @@ function renderAll() {
           bridge?.showShared ? h('button', { class: 'chip on', onClick: () => bridge.showShared() }, '열기') : null),
     offlineBanner(),
   ].filter(Boolean));
+  v.bar.replaceChildren(bottomBar());
   v.box.setOptions(gestures());
-  v.box.setEmpty('이 날은 비어 있어요', '오른쪽 위 + 버튼으로 내 젤리나 공유 젤리를 넣어 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
+  v.box.setEmpty('이 날은 비어 있어요', '아래 ＋ 로 내 젤리나 공유 젤리를 넣어 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
   v.box.set([...personal.map(personalItem), ...shared.map(sharedItem)]);
 }
 
@@ -1113,6 +1255,97 @@ function buildSheet() {
   else if (s.kind === 'golden') buildGoldenSheet();
 }
 
+/** Where a length sits on the stretch bar: the first half for up to two hours, the rest up to twelve. */
+function lengthToFraction(minutes) {
+  const m = Math.min(MAX_DURATION, Math.max(10, minutes));
+  return m <= SHORT_MAX ? (0.5 * (m - 10)) / (SHORT_MAX - 10) : 0.5 + (0.5 * (m - SHORT_MAX)) / (MAX_DURATION - SHORT_MAX);
+}
+
+function fractionToLength(fraction) {
+  const f = Math.min(1, Math.max(0, fraction));
+  if (f <= 0.5) return Math.min(SHORT_MAX, Math.max(10, 10 + Math.round(((f / 0.5) * (SHORT_MAX - 10)) / 10) * 10));
+  return Math.min(MAX_DURATION, Math.max(SHORT_MAX, SHORT_MAX + Math.round((((f - 0.5) / 0.5) * (MAX_DURATION - SHORT_MAX)) / 30) * 30));
+}
+
+/**
+ * Pull the jelly to make it longer: it stretches under the finger and buzzes a little every step,
+ * like a chewy sweet being pulled. [get] and [set] read and change the length; [onEnd] runs when let go.
+ */
+function stretchLength(get, set, onEnd) {
+  const KNOB = 30;
+  const text = h('span', { class: 'stretch-text' });
+  const bar = h('div', { class: 'jelly stretch-bar' }, text, h('span', { class: 'stretch-knob', 'aria-hidden': 'true' }, '⇢'));
+  const track = h('div', {
+    class: 'stretch-track',
+    role: 'slider',
+    tabindex: '0',
+    'aria-label': '길이',
+    'aria-valuemin': '10',
+    'aria-valuemax': String(MAX_DURATION),
+    'data-testid': 'length',
+  }, bar);
+  const ticks = h('div', { class: 'stretch-ticks' }, LENGTH_TICKS.map(([m, label], i) => h('span', {
+    'data-m': String(m),
+    style: {
+      left: `calc(${KNOB / 2}px + (100% - ${KNOB}px) * ${lengthToFraction(m)})`,
+      transform: i === LENGTH_TICKS.length - 1 ? 'translateX(-85%)' : 'translateX(-50%)',
+    },
+  }, label)));
+  const at = (clientX) => {
+    const r = track.getBoundingClientRect();
+    return fractionToLength((clientX - r.left - KNOB / 2) / Math.max(1, r.width - KNOB));
+  };
+  const apply = (m) => {
+    if (m === get()) return;
+    set(m);
+    try {
+      navigator.vibrate?.(4);
+    } catch {
+      // No buzz here.
+    }
+  };
+  let dragging = false;
+  track.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    track.setPointerCapture?.(e.pointerId);
+    apply(at(e.clientX));
+  });
+  track.addEventListener('pointermove', (e) => {
+    if (dragging) apply(at(e.clientX));
+  });
+  const stop = () => {
+    if (!dragging) return;
+    dragging = false;
+    onEnd?.();
+  };
+  track.addEventListener('pointerup', stop);
+  track.addEventListener('pointercancel', stop);
+  track.addEventListener('keydown', (e) => {
+    const m = get();
+    const step = m < SHORT_MAX || (m === SHORT_MAX && e.key === 'ArrowLeft') ? 10 : 30;
+    if (e.key === 'ArrowRight') apply(Math.min(MAX_DURATION, m + step));
+    else if (e.key === 'ArrowLeft') apply(Math.max(10, m - step));
+    else return;
+    e.preventDefault();
+    onEnd?.();
+  });
+  const paint = (flavor) => {
+    const m = get();
+    for (const [k, v] of Object.entries(flavorVars(flavor))) bar.style.setProperty(`--${k}`, v);
+    bar.style.width = `max(64px, calc(${KNOB}px + (100% - ${KNOB}px) * ${lengthToFraction(m)}))`;
+    text.textContent = durationText(m);
+    track.setAttribute('aria-valuenow', String(m));
+    track.setAttribute('aria-valuetext', durationText(m));
+    for (const t of ticks.children) t.classList.toggle('on', Number(t.dataset.m) === m);
+  };
+  return { el: h('div', { class: 'stretch' }, track, ticks), paint };
+}
+
+/** How many jellies of [date] are pinned, leaving out [exceptId]. */
+function pinsOn(date, exceptId) {
+  return state.jellies.filter((j) => j.date === date && j.pinned && j.id !== exceptId).length;
+}
+
 function buildJellySheet() {
   const s = state.sheet;
   const isNew = s.kind === 'new';
@@ -1121,7 +1354,7 @@ function buildJellySheet() {
   // The draft that is shown and edited; for an existing jelly, changes are saved as they happen.
   const draft = existing
     ? { ...existing }
-    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.myColor, done: false, note: '' };
+    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.myColor, done: false, note: '', pinned: false };
 
   const preview = h('div', { class: 'jelly card', style: { animation: 'none', marginBottom: '6px' } });
   const title = h('input', {
@@ -1134,10 +1367,15 @@ function buildJellySheet() {
   const date = h('input', { class: 'input', type: 'date', value: draft.date, 'data-testid': 'date' });
   const time = h('input', { class: 'input', type: 'time', value: draft.start == null ? '' : hm(draft.start), 'data-testid': 'time' });
   const noTime = h('button', { class: 'chip', type: 'button' }, '시간 없음');
-  const durationRow = h('div', { class: 'row' });
+  const length = stretchLength(() => draft.duration, (m) => save({ duration: m }), () => save({}, true));
   const colorRow = h('div', { class: 'row' });
   const doneSwitch = h('span', { class: 'switch' });
-  const doneRow = h('button', { class: 'toggle', type: 'button', 'data-testid': 'done' }, h('span', null, '다 했어요'), doneSwitch);
+  const doneRow = h('button', { class: 'toggle', type: 'button', 'data-testid': 'done' }, h('span', null, '✓ 다 먹었어요'), doneSwitch);
+  const pinSwitch = h('span', { class: 'switch' });
+  const pinNote = h('small', { class: 'toggle-note' });
+  const pinRow = h('button', { class: 'toggle', type: 'button', 'data-testid': 'pin' },
+    h('span', { class: 'toggle-text' }, h('span', null, '📌 젤위로 고정'), pinNote), pinSwitch);
+  const selfId = isNew ? null : s.id;
   const note = h('textarea', { class: 'input', placeholder: '장소, 준비물 같은 설명 (선택)', maxlength: '1000' }, draft.note || '');
   const whoLine = h('div', { class: 'who-line' });
 
@@ -1170,11 +1408,13 @@ function buildJellySheet() {
     );
     for (const [k, v] of Object.entries(flavorVars(draft.flavor))) preview.style.setProperty(`--${k}`, v);
     preview.classList.toggle('done', !!draft.done);
-    durationRow.replaceChildren(...DURATIONS.map((m) => h('button', {
-      class: `chip${draft.duration === m ? ' on' : ''}`,
-      type: 'button',
-      onClick: () => save({ duration: m }, true),
-    }, durationText(m))));
+    length.paint(draft.flavor);
+    const full = !draft.pinned && pinsOn(draft.date, selfId) >= MAX_PINNED;
+    pinSwitch.classList.toggle('on', !!draft.pinned);
+    pinRow.classList.toggle('muted', full);
+    pinNote.textContent = full
+      ? '이 날은 벌써 3개가 고정돼 있어요. 하나를 풀면 고정할 수 있어요.'
+      : '젤 중요한 젤리를 상자 맨 위에 꼭 붙여 둬요. 하루 3개까지예요.';
     colorRow.replaceChildren(...FLAVORS.map((f, i) => h('button', {
       class: `swatch${draft.flavor === i ? ' on' : ''}`,
       type: 'button',
@@ -1200,7 +1440,12 @@ function buildJellySheet() {
   });
   date.addEventListener('change', () => {
     if (!date.value) return;
-    save({ date: date.value }, true);
+    const patch = { date: date.value };
+    if (draft.pinned && pinsOn(date.value, selfId) >= MAX_PINNED) {
+      patch.pinned = false;
+      toast('그날은 고정 자리가 꽉 차서 고정을 풀었어요');
+    }
+    save(patch, true);
     // Follow the jelly to its new day, so it stays in view.
     if (!isNew) showDay(date.value);
   });
@@ -1214,17 +1459,26 @@ function buildJellySheet() {
     save({ start: null }, true);
   });
   doneRow.addEventListener('click', () => save({ done: !draft.done }, true));
+  pinRow.addEventListener('click', () => {
+    if (!draft.pinned && pinsOn(draft.date, selfId) >= MAX_PINNED) {
+      toast('이 날은 벌써 3개가 고정돼 있어요. 하나를 풀면 고정할 수 있어요');
+      return;
+    }
+    save({ pinned: !draft.pinned }, true);
+  });
   note.addEventListener('input', () => save({ note: note.value }));
 
   const children = [
+    h('div', { class: 'sheet-kicker' }, isNew ? '새 젤리 빚기' : '젤리 다듬기'),
     preview,
     title,
-    h('div', { class: 'field-label' }, '날짜와 시간'),
-    h('div', { class: 'row' }, date, time, noTime),
-    h('div', { class: 'field-label' }, '길이'),
-    durationRow,
-    h('div', { class: 'field-label' }, '색'),
+    h('div', { class: 'field-label' }, '맛'),
     colorRow,
+    h('div', { class: 'field-label' }, '길이 · 쭉 당기면 늘어나요'),
+    length.el,
+    h('div', { class: 'field-label' }, '언제'),
+    h('div', { class: 'row' }, date, time, noTime),
+    pinRow,
   ];
 
   if (isNew) {
@@ -1261,7 +1515,7 @@ function buildJellySheet() {
           buildSheet();
           toast(state.online ? '올렸어요. 함께 쓰는 사람 화면에도 바로 보여요' : '연결되면 바로 올라가요');
         },
-      }, '올리기'),
+      }, '젤리 올리기'),
     );
   } else {
     const memoList = h('div', { class: 'memos', 'data-testid': 'memos' });
@@ -1348,7 +1602,7 @@ function buildJellySheet() {
     };
     s.sync = (j) => {
       latest = j;
-      for (const key of ['date', 'start', 'duration', 'flavor', 'done']) if (!(key in pendingPatch)) draft[key] = j[key];
+      for (const key of ['date', 'start', 'duration', 'flavor', 'done', 'pinned']) if (!(key in pendingPatch)) draft[key] = j[key];
       if (document.activeElement !== title && !('title' in pendingPatch)) {
         draft.title = j.title;
         title.value = j.title;

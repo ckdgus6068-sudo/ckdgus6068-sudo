@@ -280,6 +280,25 @@ describe('jellies and memos', () => {
     await assertSucceeds(deleteDoc(doc(db('bob'), 'spaces/s1/jellies/j1')));
   });
 
+  test('a jelly may be pinned, but only with a sealed value', async () => {
+    await aliceMakesSpace();
+    await bobJoins();
+    await assertSucceeds(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1'), jelly('alice', { pinned: S() })));
+    await assertSucceeds(setDoc(doc(db('alice'), 'spaces/s1/jellies/j2'), jelly('alice')));
+    await assertSucceeds(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j2'), {
+      pinned: S(),
+      updatedBy: 'bob',
+      updatedByName: S(),
+      updatedAt: serverTimestamp(),
+    }));
+    await assertFails(setDoc(doc(db('alice'), 'spaces/s1/jellies/j3'), jelly('alice', { pinned: true })));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j2'), {
+      pinned: S(201),
+      updatedBy: 'bob',
+      updatedAt: serverTimestamp(),
+    }));
+  });
+
   test('outsiders see and change nothing', async () => {
     await aliceMakesSpace();
     await assertSucceeds(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1'), jelly('alice')));

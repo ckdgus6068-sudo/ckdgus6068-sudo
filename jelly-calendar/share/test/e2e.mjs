@@ -167,11 +167,21 @@ try {
     await tid(page, 'add').click();
     await tid(page, 'title').fill(title);
     if (time) await tid(page, 'time').fill(time);
+    if (title === '주말 등산') {
+      // Pulled all the way out: a whole day's hike.
+      const track = await tid(page, 'length').boundingBox();
+      await page.mouse.click(track.x + track.width - 4, track.y + track.height / 2);
+      check((await tid(page, 'length').getAttribute('aria-valuenow')) === '720', 'galaxy: the length stretches to 12 hours');
+    }
     await tid(page, 'post').click();
     await tid(page, 'memos').waitFor();
     await page.goBack();
   }
   await b.locator(`[data-day="${day}"]`).click();
+  // Finished jellies leave the grid and fold away under the day.
+  await tid(b, 'done-fold').waitFor({ timeout: 10000 });
+  check(!(await b.locator(`[data-day="${day}"] .mini`).count()), 'iphone: a finished jelly leaves the month grid');
+  await tid(b, 'done-fold').click();
   await b.locator('[data-testid="card"].done').waitFor({ timeout: 10000 });
   check(true, 'iphone: sees it marked done');
   await b.waitForTimeout(800);
@@ -181,6 +191,14 @@ try {
   await shot(a, '7-galaxy-month');
   const cells = await b.locator(`[data-day="${month}-17"] .mini`).count();
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
+  const firstWeekday = await b.locator('.weekdays div').first().textContent();
+  check(firstWeekday === '일', 'iphone: weeks start on Sunday');
+  const { holidayOn } = await import(`${DOCS}share/holidays.js`);
+  const holidayIso = Array.from({ length: 31 }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`).find((iso) => holidayOn(iso));
+  if (holidayIso) {
+    const red = await b.locator(`[data-day="${holidayIso}"] .num.sun`).count();
+    check(red === 1, `iphone: ${holidayOn(holidayIso).name} (${holidayIso}) is red in the grid`);
+  }
 
   // The server holds no readable names, titles or memos: look at the raw documents in the emulator.
   const rawDocs = (collectionId) => fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
@@ -213,8 +231,8 @@ try {
   let blobs = await box(a);
   const cake = blobs.find((c) => c.title === '케이크 찾기');
   await a.mouse.dblclick(cake.x, cake.y);
-  await b.locator(`[data-day="${month}-17"] .mini.done`).waitFor({ timeout: 10000 });
-  check(true, 'iphone: sees the jelly finished in the galaxy box');
+  await b.waitForFunction((sel) => document.querySelectorAll(sel).length === 1, `[data-day="${month}-17"] .mini`, { timeout: 10000 });
+  check(true, 'iphone: sees the jelly finished in the galaxy box (it leaves the grid)');
 
   // A tap opens the jelly with its memos.
   await settled(a, 2);
@@ -223,7 +241,14 @@ try {
   await a.mouse.click(birthday.x, birthday.y);
   await tid(a, 'memos').waitFor();
   check((await tid(a, 'title').inputValue()) === '부모님 생신', 'galaxy box: a tap opens the jelly');
+  // Pinned: it sits at the top of the box, here and on the other phone.
+  await tid(a, 'pin').click();
   await a.goBack();
+  await a.waitForFunction(() => window.__jellyBox?.centers().some((c) => c.title === '부모님 생신' && c.fixed), null, { timeout: 10000 });
+  check(true, 'galaxy box: a pinned jelly is held at the top');
+  await b.locator(`[data-day="${month}-17"] .mini.pinned`).waitFor({ timeout: 10000 });
+  check(true, 'iphone: sees the jelly pinned in the month grid');
+  await shot(a, '8b-galaxy-box-pinned');
 
   // Swiping an empty spot turns the day.
   const area = await tid(a, 'box').boundingBox();
@@ -288,9 +313,10 @@ try {
       date,
       doubleTap: true,
       longPress: true,
+      sundayFirst: true,
       personal: [
-        { id: 'p1', title: '헬스', start: 19 * 60, duration: 60, flavor: 3, done: false },
-        { id: 'p2', title: '보고서 작성', start: 14 * 60, duration: 90, flavor: 6, done: true },
+        { id: 'p1', title: '헬스', date, start: 19 * 60, duration: 60, flavor: 3, done: false },
+        { id: 'p2', title: '보고서 작성', date, start: 14 * 60, duration: 90, flavor: 6, done: true },
       ],
     };
     const call = (name) => (...args) => {
@@ -304,6 +330,7 @@ try {
       createPersonal: call('createPersonal'),
       shiftDay: call('shiftDay'),
       showShared: call('showShared'),
+      showDay: call('showDay'),
       foundGolden: call('foundGolden'),
     };
   }, `${month}-17`);
@@ -346,6 +373,19 @@ try {
   });
   check((await display(app)).includes('Bagel'), 'all: follows the lettering picked in the app');
 
+  // "모두" as a month: my jellies and the shared ones, and a tapped day goes to the app.
+  await tid(app, 'view-month').click();
+  await tid(app, 'grid').waitFor();
+  const mine17 = await app.locator(`[data-day="${month}-17"] .mini.mine`).count();
+  const shared17 = await app.locator(`[data-day="${month}-17"] .mini:not(.mine)`).count();
+  check(mine17 === 1 && shared17 >= 1, `all: the month shows my unfinished jelly and the shared ones (${mine17} + ${shared17})`);
+  await shot(app, '11b-galaxy-all-month');
+  await app.locator(`[data-day="${month}-24"]`).click();
+  await called(app, 'showDay', `${month}-24`);
+  check(true, 'all: a tapped day goes to the app');
+  await tid(app, 'view-box').click();
+  await settled(app, 4);
+
   await settled(app, 4);
   blobs = await box(app);
   const shared = blobs.find((c) => c.title === '부모님 생신');
@@ -370,7 +410,7 @@ try {
   check((await tid(app, 'legend').textContent()).includes('공유 젤리 1'), 'all: follows the app to another day');
 
   // "+" asks which kind of jelly; my own goes to the app's editor for the day now shown.
-  await tid(app, 'box-add').click();
+  await tid(app, 'add').click();
   await tid(app, 'add-shared').waitFor();
   await shot(app, '12-galaxy-all-add');
   await tid(app, 'add-personal').click();

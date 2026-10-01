@@ -40,7 +40,7 @@ const INVITE_DAYS = 3;
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 export const CODE_LENGTH = 10;
 /** The sealed fields of a jelly; everything else on it is bookkeeping the rules need. */
-const JELLY_FIELDS = ['title', 'date', 'start', 'duration', 'flavor', 'done', 'note', 'byName', 'updatedByName'];
+const JELLY_FIELDS = ['title', 'date', 'start', 'duration', 'flavor', 'done', 'note', 'pinned', 'byName', 'updatedByName'];
 
 let db = null;
 let auth = null;
@@ -350,6 +350,7 @@ export function addJelly(spaceId, fields, myName, onDone) {
     flavor: fields.flavor,
     done: false,
     note: fields.note ?? '',
+    pinned: !!fields.pinned,
     byName: myName,
     updatedByName: myName,
   }).then((sealed) => setDoc(ref, {

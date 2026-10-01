@@ -102,7 +102,7 @@ service cloud.firestore {
       match /jellies/{jellyId} {
         function validJelly(d) {
           return d.keys().hasOnly(['title', 'date', 'start', 'duration', 'flavor', 'done', 'note',
-                                   'byName', 'updatedByName', 'by', 'createdAt', 'updatedBy',
+                                   'pinned', 'byName', 'updatedByName', 'by', 'createdAt', 'updatedBy',
                                    'updatedAt', 'memoCount', 'lastMemoAt'])
             && d.keys().hasAll(['title', 'date', 'start', 'duration', 'flavor', 'done', 'note',
                                 'by', 'createdAt', 'updatedBy', 'updatedAt', 'memoCount'])
@@ -113,6 +113,7 @@ service cloud.firestore {
             && sealed(d.flavor, 200)
             && sealed(d.done, 200)
             && sealed(d.note, 6000)
+            && (!('pinned' in d) || sealed(d.pinned, 200))
             && (!('byName' in d) || sealed(d.byName, 500))
             && (!('updatedByName' in d) || sealed(d.updatedByName, 500))
             && d.by is string
