@@ -108,9 +108,10 @@ fun CalendarScreen(
 
     // The shared calendar is a web page, the same one the other person opens on an iPhone. In "모두"
     // the page shows the selected day as one box, with the phone's own jellies handed over to it.
-    if (space != Space.MINE) {
-        Column(modifier.fillMaxSize()) {
-            SpaceTabs(space, actions)
+    Column(modifier.fillMaxSize()) {
+        // One place for the tabs, so the jelly behind them slides from tab to tab.
+        SpaceTabs(space, actions)
+        if (space != Space.MINE) {
             if (space == Space.ALL) {
                 TopBar(
                     title = dateTitle(selected),
@@ -124,119 +125,115 @@ fun CalendarScreen(
             }
             // The page has its own text fields (memos), so it makes room for the keyboard itself.
             sharedSpace(Modifier.weight(1f).fillMaxWidth().imePadding())
-        }
-        return
-    }
-
-    Column(modifier.fillMaxSize()) {
-        SpaceTabs(space, actions)
-        TopBar(
-            title = if (compact) weekTitle(weekStart) else dateTitle(selected),
-            subtitle = when {
-                compact && today in weekDays -> "이번 주"
-                !compact && selected == today -> "오늘"
-                !compact && selected == today.plusDays(1) -> "내일"
-                else -> null
-            },
-            actions = actions,
-        ) {
-            ModeToggle(mode) { actions.changeMode(it) }
-        }
-        if (compact) {
-            WeekHeader(
-                days = weekDays,
-                data = data,
-                today = today,
-                gutter = 30.dp,
-                drag = drag,
-                onPick = {
-                    actions.select(it)
-                    actions.changeMode(ViewMode.DAY)
-                },
-            )
         } else {
-            DayStrip(
-                days = weekDays,
-                selected = selected,
-                data = data,
-                today = today,
-                drag = drag,
-                onPick = { actions.select(it) },
-            )
-            if (!selected.isBefore(today)) {
-                val status = WakeLogic.status(data, selected, now)
-                WakeCard(
-                    status = status,
-                    gapMin = data.settings.wakeGapMin,
-                    source = data.wakeOn(selected)?.source,
-                    requestedMin = data.lastAlarmRequest?.takeIf { it.date == selected }?.minute,
-                    onSetAlarm = { minute, label -> actions.setAlarm(selected, minute, label) },
-                    onMoveFirst = { jelly, minute -> actions.moveFirst(jelly, selected, minute) },
-                    onOpenAlarms = { actions.openAlarms() },
-                    modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp),
-                )
+            TopBar(
+                title = if (compact) weekTitle(weekStart) else dateTitle(selected),
+                subtitle = when {
+                    compact && today in weekDays -> "이번 주"
+                    !compact && selected == today -> "오늘"
+                    !compact && selected == today.plusDays(1) -> "내일"
+                    else -> null
+                },
+                actions = actions,
+            ) {
+                ModeToggle(mode) { actions.changeMode(it) }
             }
-        }
-        val hintHidden = if (mode == ViewMode.BOX) data.settings.boxHintDismissed else data.settings.hintDismissed
-        if (!hintHidden) {
-            HintBanner(
-                text = hintText(mode, data.settings.doneByDoubleTap, data.settings.doneByLongPress),
-                onGuide = { actions.openGuide() },
-                onDismiss = { actions.dismissHint(mode) },
-            )
-        }
-        Box(Modifier.weight(1f).padding(top = 6.dp)) {
-            val scroll = if (compact) weekScroll else dayScroll
-            val days = if (compact) weekDays else listOf(selected)
-            if (mode == ViewMode.BOX) {
-                JellyBoxBoard(
-                    date = selected,
-                    jellies = Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED },
+            if (compact) {
+                WeekHeader(
+                    days = weekDays,
+                    data = data,
+                    today = today,
+                    gutter = 30.dp,
                     drag = drag,
-                    doneByDoubleTap = data.settings.doneByDoubleTap,
-                    doneByLongPress = data.settings.doneByLongPress,
-                    onOpen = { actions.open(it) },
-                    onToggleDone = { actions.toggleDone(it) },
-                    onSwipe = { actions.shift(it) },
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
+                    onPick = {
+                        actions.select(it)
+                        actions.changeMode(ViewMode.DAY)
+                    },
                 )
             } else {
-            InitialScroll(scroll, data, days, today, nowMinute, compact)
-            TimelineGrid(
-                days = days,
-                data = data,
-                today = today,
-                nowMinute = nowMinute,
-                compact = compact,
-                scrollState = scroll,
+                DayStrip(
+                    days = weekDays,
+                    selected = selected,
+                    data = data,
+                    today = today,
+                    drag = drag,
+                    onPick = { actions.select(it) },
+                )
+                if (!selected.isBefore(today)) {
+                    val status = WakeLogic.status(data, selected, now)
+                    WakeCard(
+                        status = status,
+                        gapMin = data.settings.wakeGapMin,
+                        source = data.wakeOn(selected)?.source,
+                        requestedMin = data.lastAlarmRequest?.takeIf { it.date == selected }?.minute,
+                        onSetAlarm = { minute, label -> actions.setAlarm(selected, minute, label) },
+                        onMoveFirst = { jelly, minute -> actions.moveFirst(jelly, selected, minute) },
+                        onOpenAlarms = { actions.openAlarms() },
+                        modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp),
+                    )
+                }
+            }
+            val hintHidden = if (mode == ViewMode.BOX) data.settings.boxHintDismissed else data.settings.hintDismissed
+            if (!hintHidden) {
+                HintBanner(
+                    text = hintText(mode, data.settings.doneByDoubleTap, data.settings.doneByLongPress),
+                    onGuide = { actions.openGuide() },
+                    onDismiss = { actions.dismissHint(mode) },
+                )
+            }
+            Box(Modifier.weight(1f).padding(top = 6.dp)) {
+                val scroll = if (compact) weekScroll else dayScroll
+                val days = if (compact) weekDays else listOf(selected)
+                if (mode == ViewMode.BOX) {
+                    JellyBoxBoard(
+                        date = selected,
+                        jellies = Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED },
+                        drag = drag,
+                        doneByDoubleTap = data.settings.doneByDoubleTap,
+                        doneByLongPress = data.settings.doneByLongPress,
+                        onOpen = { actions.open(it) },
+                        onToggleDone = { actions.toggleDone(it) },
+                        onSwipe = { actions.shift(it) },
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
+                    )
+                } else {
+                InitialScroll(scroll, data, days, today, nowMinute, compact)
+                TimelineGrid(
+                    days = days,
+                    data = data,
+                    today = today,
+                    nowMinute = nowMinute,
+                    compact = compact,
+                    scrollState = scroll,
+                    drag = drag,
+                    onOpen = { actions.open(it) },
+                    onToggleDone = { actions.toggleDone(it) },
+                    onResize = { jelly, duration -> actions.resize(jelly, duration) },
+                    onCreateAt = { date, start -> actions.create(date, start) },
+                    onSwipe = { actions.shift(it) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                }
+                JellyFab(
+                    onClick = { actions.create(if (compact && today in weekDays) today else selected, null) },
+                    // In the box the jellies pile up at the bottom, so the button waits in the empty top corner.
+                    modifier = if (mode == ViewMode.BOX) {
+                        Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 22.dp)
+                    } else {
+                        Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp)
+                    },
+                )
+            }
+            JellyTray(
+                items = Planner.tray(data),
+                weekStart = weekStart,
                 drag = drag,
+                settings = data.settings,
                 onOpen = { actions.open(it) },
                 onToggleDone = { actions.toggleDone(it) },
-                onResize = { jelly, duration -> actions.resize(jelly, duration) },
-                onCreateAt = { date, start -> actions.create(date, start) },
-                onSwipe = { actions.shift(it) },
-                modifier = Modifier.fillMaxSize(),
-            )
-            }
-            JellyFab(
-                onClick = { actions.create(if (compact && today in weekDays) today else selected, null) },
-                // In the box the jellies pile up at the bottom, so the button waits in the empty top corner.
-                modifier = if (mode == ViewMode.BOX) {
-                    Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 22.dp)
-                } else {
-                    Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp)
-                },
+                onAdd = { actions.create(null, null) },
             )
         }
-        JellyTray(
-            items = Planner.tray(data),
-            weekStart = weekStart,
-            drag = drag,
-            settings = data.settings,
-            onOpen = { actions.open(it) },
-            onToggleDone = { actions.toggleDone(it) },
-            onAdd = { actions.create(null, null) },
-        )
     }
 }
 
