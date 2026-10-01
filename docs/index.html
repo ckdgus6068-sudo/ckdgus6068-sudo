@@ -56,8 +56,8 @@
         <small style="display:block;margin-top:6px;color:var(--text-sub)">버튼이 안 되면 오른쪽 아래(또는 위) 메뉴 ⋮에서 ‘다른 브라우저로 열기’를 눌러 주세요.</small>
       </div>
 
-      <section class="part">
-        <h2>갤럭시에서 설치하기</h2>
+      <section class="part" id="galaxy">
+        <h2>갤럭시 유저</h2>
         <p class="note">개인이 만든 앱이라 플레이스토어 대신 이곳에서 받아요. 그래서 설치할 때 휴대폰이 확인 창을 몇 번 띄우는데, 아래 순서대로 누르시면 돼요.</p>
         <a class="btn block" href="https://github.com/ckdgus6068-sudo/ckdgus6068-sudo/releases/download/jelly-calendar-latest/JellyCalendar.apk" style="text-decoration:none" data-testid="apk">갤럭시 앱 받기</a>
         <ol class="steps">
@@ -82,17 +82,25 @@
         </ul>
       </section>
 
-      <section class="part">
-        <h2>아이폰에서 함께 쓰기</h2>
-        <a class="btn ghost block" href="share/" style="text-decoration:none">공유 젤리 열기</a>
+      <section class="part" id="iphone">
+        <h2>아이폰 유저</h2>
+        <p class="note">아이폰에서는 사파리에서 여는 ‘공유 젤리’로 써요. 홈 화면에 추가해 두면 앱처럼 열려요.</p>
+        <a class="btn block" href="share/" style="text-decoration:none" data-testid="iphone-open">공유 젤리 열기</a>
         <ol class="steps">
-          <li>사파리에서 열고, 가입하기 전에 공유 버튼 → ‘홈 화면에 추가’를 눌러 주세요.</li>
-          <li>홈 화면의 ‘공유 젤리’ 아이콘으로 열어 아이디로 가입한 뒤, 받은 초대 코드를 넣어 주세요.</li>
+          <li>위 버튼으로 연 화면에서, 가입하기 전에 사파리의 공유 버튼(네모에 화살표) → ‘홈 화면에 추가’를 눌러 주세요.</li>
+          <li>홈 화면에 생긴 ‘공유 젤리’ 아이콘으로 열어 아이디로 가입해 주세요.</li>
+          <li>‘새 공유 달력 만들기’로 바로 시작하거나, 받은 초대 코드를 넣어 함께 쓸 수 있어요.
+            <small>삼성 시계 알람처럼 갤럭시 앱에만 있는 기능은 아이폰에서는 쓸 수 없어요.</small></li>
         </ol>
       </section>
     </div>
   </div>
   <script>
+    // An iPhone sees its own steps first.
+    if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
+      var galaxy = document.getElementById('galaxy');
+      galaxy.parentNode.insertBefore(document.getElementById('iphone'), galaxy);
+    }
     // KakaoTalk's own browser often fails to save an APK: offer to open this page in the phone's browser.
     if (/KAKAOTALK/i.test(navigator.userAgent)) {
       document.getElementById('kakao').hidden = false;
