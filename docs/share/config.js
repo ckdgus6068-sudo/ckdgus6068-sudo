@@ -14,3 +14,9 @@ export const firebaseConfig = {
 // Where people open the shared calendar in a browser; invite links point here, also when the page
 // runs inside the Android app (which carries its own copy of it).
 export const publicUrl = 'https://ckdgus6068-sudo.github.io/ckdgus6068-sudo/share/';
+
+// Whether to offer "구글로 시작하기" in a browser. Turn on once Google sign-in is enabled in the
+// Firebase console (Authentication → Sign-in method → Google) and this site's domain is listed
+// under Authentication → Settings → Authorized domains. Inside the Android app the app decides.
+export const googleSignIn = false;
+

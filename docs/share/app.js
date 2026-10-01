@@ -1,5 +1,5 @@
 // 공유 젤리: a month of jellies shared by two (or a few) people, on iPhone, Android or any browser.
-import { firebaseConfig, publicUrl } from './config.js';
+import { firebaseConfig, googleSignIn, publicUrl } from './config.js';
 import * as store from './store.js';
 import { JellyBox, GOLDEN_FLAVOR, setTitleFace } from './box.js';
 import { holidayOn } from './holidays.js';
@@ -35,7 +35,7 @@ const LENGTH_TICKS = [[30, '30분'], [60, '1시간'], [120, '2시간'], [360, '6
 
 // The hidden golden jelly, as in the app (GoldenJelly.kt): grab one jelly in the box and let it go
 // 50 times without a break. Who finders are sent to is written here and in the app (GoldenDialog.kt).
-const MAKER = '황OO';
+const MAKER = '‘대 AI 시대의 딸깍 개발자’ 황창현';
 const GOLDEN_GRABS = 50;
 const GOLDEN_HINT = 25;
 const GOLDEN_PATIENCE_MS = 3000;
@@ -322,6 +322,11 @@ async function boot() {
 
   ready = true;
   pendingCode = codeFromLink();
+  if (!state.uid) {
+    // Nobody signed in on this phone yet: the welcome page asks for an account first.
+    render();
+    return;
+  }
   const ids = savedSpaces();
   for (const id of ids) {
     const key = saved.get(`key.${id}`);
@@ -350,9 +355,23 @@ function codeFromLink() {
 // The app tells the page what to show (the shared calendar, or everything on one day together with
 // the phone's own jellies) and pokes it when that changes; the page then asks for the details.
 window.jellyHost = {
+  ...window.jellyHost,
   poke() {
     readHost();
     render();
+  },
+  /** The app signed in with Google and hands over the ID token. */
+  async googleToken(token) {
+    try {
+      await store.signInWithGoogle(token);
+      await afterGoogle(pendingCode);
+    } catch (e) {
+      console.error(e);
+      toast(idError(e));
+    }
+  },
+  googleFailed(reason) {
+    if (reason !== 'cancelled') toast('구글 로그인을 하지 못했어요');
   },
 };
 
@@ -405,6 +424,203 @@ function reportViewport() {
 
 // ---------------------------------------------------------------- welcome
 
+// ---------------------------------------------------------------- accounts and the key vault
+
+let vaultTimer = 0;
+
+/** Writes this phone's calendar keys into the account's vault, a moment after they change. */
+function syncVault() {
+  const raw = saved.get('vault');
+  const who = store.account();
+  if (!raw || !who || who.kind === 'guest') return;
+  clearTimeout(vaultTimer);
+  vaultTimer = setTimeout(() => {
+    const spaces = savedSpaces().map((id) => ({ id, key: saved.get(`key.${id}`) })).filter((x) => x.key);
+    store.saveVault(raw, { spaces, profile: { name: state.myName, color: state.myColor } }, saved.get('vaultLock') || 'password')
+      .catch((e) => console.warn('vault not saved', e));
+  }, 300);
+}
+
+/** Opens the account's vault with [raw] and brings its calendars to this phone. */
+async function restoreFromVault(raw, lock) {
+  saved.set('vault', raw);
+  saved.set('vaultLock', lock);
+  let contents = null;
+  try {
+    contents = await store.readVault(raw);
+  } catch (e) {
+    console.warn(e);
+    toast('열쇠 보관함을 열지 못했어요');
+  }
+  const kept = (Array.isArray(contents?.spaces) ? contents.spaces : [])
+    .filter((x) => typeof x?.id === 'string' && typeof x?.key === 'string');
+  for (const { id, key } of kept) {
+    saved.set(`key.${id}`, key);
+    await store.useSpaceKey(id, key).catch((e) => console.warn(e));
+  }
+  rememberSpaces([...new Set([...savedSpaces(), ...kept.map((x) => x.id)])]);
+  const profile = contents?.profile;
+  if (profile?.name) rememberProfile(profile.name, Number.isInteger(profile.color) ? profile.color : state.myColor);
+  return kept.length;
+}
+
+/** Signed in (or a guest got an account): show the calendars, or the next welcome step. */
+function enterAccount(code) {
+  state.uid = store.uid();
+  syncVault();
+  const ids = savedSpaces();
+  for (const id of ids) watchGroup(id);
+  screen = null;
+  if (ids.length) {
+    openSpace(ids.includes(state.spaceId) ? state.spaceId : ids[0]);
+    if (code && !isAll()) openSheet({ kind: 'new-group', code });
+  } else {
+    pendingCode = code || pendingCode;
+    render();
+  }
+}
+
+function idError(e) {
+  const code = e?.code || '';
+  if (code === 'auth/email-already-in-use' || code === 'auth/credential-already-in-use') return '이미 있는 아이디예요. 다른 아이디를 정하거나 로그인해 주세요';
+  if (['auth/invalid-credential', 'auth/invalid-login-credentials', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) return '아이디나 비밀번호가 맞지 않아요';
+  if (code === 'auth/too-many-requests') return '여러 번 틀려서 잠시 막혔어요. 조금 뒤에 다시 해 주세요';
+  if (code === 'auth/operation-not-allowed') return '아직 이 로그인 방법이 켜져 있지 않아요';
+  if (code === 'auth/network-request-failed') return '인터넷 연결을 확인해 주세요';
+  return '잠시 후 다시 해 주세요';
+}
+
+/** Google in a browser shows a pop-up; inside the Android app the app signs in and hands over a token. */
+function canGoogle() {
+  return inApp ? !!bridge?.googleSignIn : googleSignIn || testMode;
+}
+
+async function startGoogle(code) {
+  pendingCode = code || pendingCode;
+  if (inApp) {
+    bridge.googleSignIn();
+    return;
+  }
+  try {
+    await store.signInWithGoogle();
+    await afterGoogle(code);
+  } catch (e) {
+    console.error(e);
+    if (e?.code !== 'auth/popup-closed-by-user' && e?.code !== 'auth/cancelled-popup-request') toast(idError(e));
+  }
+}
+
+/** After Google: a vault locked with a vault password asks for it; otherwise carry on. */
+async function afterGoogle(code) {
+  closeSheet();
+  const lock = await store.vaultLock().catch(() => null);
+  if (lock === 'passphrase') {
+    state.uid = store.uid();
+    openSheet({ kind: 'vault-open', code });
+    return;
+  }
+  saved.set('vaultLock', 'passphrase');
+  enterAccount(code);
+}
+
+window.jellyHost = window.jellyHost || {};
+
+/**
+ * The fields of an account form: a login ID and a password, to make an account or sign in. [link]
+ * is for a guest from before accounts (only making one, which keeps their calendars).
+ */
+function accountForm({ code = '', link = false } = {}) {
+  let busy = false;
+  const idBox = h('input', {
+    class: 'input',
+    style: { width: '100%' },
+    placeholder: '아이디 (영문 소문자·숫자 4~20자)',
+    maxlength: '20',
+    autocapitalize: 'none',
+    autocomplete: 'username',
+    spellcheck: 'false',
+    'data-testid': 'account-id',
+  });
+  const pwBox = h('input', {
+    class: 'input',
+    style: { width: '100%', marginTop: '8px' },
+    type: 'password',
+    placeholder: `비밀번호 (${store.MIN_PASSWORD}자 이상)`,
+    autocomplete: link ? 'new-password' : 'current-password',
+    'data-testid': 'account-password',
+  });
+  const read = () => {
+    const id = store.cleanId(idBox.value);
+    const pw = pwBox.value;
+    if (!store.ID_PATTERN.test(id)) {
+      toast('아이디는 영문 소문자나 숫자로 시작하는 4~20자로 정해 주세요 (. _ - 도 쓸 수 있어요)');
+      idBox.focus();
+      return null;
+    }
+    if (pw.length < store.MIN_PASSWORD) {
+      toast(`비밀번호는 ${store.MIN_PASSWORD}자 이상으로 정해 주세요`);
+      pwBox.focus();
+      return null;
+    }
+    return { id, pw };
+  };
+  const run = async (button, work) => {
+    const input = read();
+    if (!input || busy) return;
+    busy = true;
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = '확인하는 중…';
+    try {
+      await work(input);
+    } catch (e) {
+      console.error(e);
+      toast(idError(e));
+    } finally {
+      busy = false;
+      if (button.isConnected) {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    }
+  };
+  const signUp = h('button', {
+    class: 'btn',
+    'data-testid': 'sign-up',
+    onClick: (e) => run(e.currentTarget, async ({ id, pw }) => {
+      const raw = await store.signUpWithId(id, pw);
+      await restoreFromVault(raw, 'password');
+      closeSheet();
+      enterAccount(code);
+      toast(link ? '계정을 만들었어요. 새 휴대폰에서도 로그인하면 달력이 열려요' : '계정을 만들었어요');
+    }),
+  }, link ? '계정 만들기' : '새로 만들기');
+  const signIn = link ? null : h('button', {
+    class: 'btn ghost',
+    'data-testid': 'sign-in',
+    onClick: (e) => run(e.currentTarget, async ({ id, pw }) => {
+      const raw = await store.signInWithId(id, pw);
+      const restored = await restoreFromVault(raw, 'password');
+      enterAccount(code);
+      if (restored) toast(`쓰던 공유 달력 ${restored}개를 열었어요`);
+    }),
+  }, '로그인');
+  return h('div', { class: 'account-form' },
+    canGoogle()
+      ? [
+          h('button', { class: 'btn block google-btn', 'data-testid': 'google', onClick: () => startGoogle(code) },
+            h('span', { class: 'google-g', 'aria-hidden': 'true' }, 'G'), link ? '구글 계정 연결하기' : '구글로 시작하기'),
+          h('div', { class: 'or' }, '또는 아이디로'),
+        ]
+      : null,
+    idBox,
+    pwBox,
+    h('div', { class: 'row account-buttons' }, signUp, signIn),
+    h('p', { class: 'account-note' }, '아이디는 로그인에만 쓰이고, 함께 쓰는 사람에게는 보이지 않아요. 달력에서 보이는 이름은 따로 정해요.'),
+    h('p', { class: 'account-note' }, '비밀번호를 잊으면 되찾을 수 없어요. 그때는 함께 쓰는 사람에게 초대 코드를 다시 받으면 돼요.'),
+  );
+}
+
 /** Makes a calendar named [groupName] with me in it under [profile], and shows it. */
 async function createGroup(groupName, profile) {
   rememberProfile(profile.name, profile.color);
@@ -431,7 +647,20 @@ function renderWelcome(code = '') {
   closeSubs();
   leaveBox();
   screen = 'welcome';
-  document.body.classList.remove('fill');
+  document.body.classList.remove('fill', 'has-bar');
+  if (!store.account()) {
+    appEl().replaceChildren(
+      h('div', { class: 'welcome', 'data-testid': 'account-step' },
+        h('img', { class: 'logo', src: 'icons/icon-192.png', alt: '' }),
+        h('h1', null, '공유 젤리'),
+        h('p', null, code ? '초대받은 달력에 들어가기 전에 내 계정부터 만들어요.' : '함께 보고 고치는 젤리 달력이에요. 먼저 내 계정을 만들거나 로그인해 주세요.'),
+        accountForm({ code }),
+        h('p', { class: 'privacy-note' }, PRIVACY_LINE),
+        installHint(),
+      ),
+    );
+    return;
+  }
   let busy = false;
   let color = state.myColor;
   const name = h('input', {
@@ -534,10 +763,19 @@ function renderWelcome(code = '') {
             codeBox,
             h('button', { class: 'btn ghost block', onClick: join, 'data-testid': 'join' }, '초대 코드로 들어가기'),
           ],
+      signedInLine(),
       h('p', { class: 'privacy-note' }, PRIVACY_LINE),
       installHint(),
     ),
   );
+}
+
+function signedInLine() {
+  const who = store.account();
+  if (!who || who.kind === 'guest') return null;
+  return h('p', { class: 'account-note', 'data-testid': 'signed-in' },
+    who.kind === 'id' ? `아이디 ‘${who.id}’로 로그인했어요 · ` : `구글 ${who.email}로 로그인했어요 · `,
+    h('button', { class: 'link-btn', onClick: signOutHere }, '로그아웃'));
 }
 
 const PRIVACY_LINE = '이름, 색, 젤리, 메모는 달력에 들어온 사람의 기기에서만 열리도록 암호화되어 저장돼요. 서버를 운영하는 사람도 내용을 볼 수 없어요.';
@@ -659,7 +897,10 @@ function closeSubs() {
 /** Shows the calendar [id] (and keeps it in this device's list). */
 function openSpace(id) {
   const ids = savedSpaces();
-  if (!ids.includes(id)) rememberSpaces([...ids, id]);
+  if (!ids.includes(id)) {
+    rememberSpaces([...ids, id]);
+    syncVault();
+  }
   if (state.spaceId !== id) {
     subs.jelly?.();
     subs.memos?.();
@@ -683,6 +924,7 @@ function forgetSpace(message, id = state.spaceId) {
   store.forgetSpaceKey(id);
   const rest = savedSpaces().filter((x) => x !== id);
   rememberSpaces(rest);
+  syncVault();
   if (id === state.spaceId) {
     if (state.sheet) hideSheet();
     state.spaceId = null;
@@ -1373,6 +1615,10 @@ function buildSheet() {
   else if (s.kind === 'groups') buildGroupsSheet();
   else if (s.kind === 'new-group') buildNewGroupSheet();
   else if (s.kind === 'rename') buildRenameSheet();
+  else if (s.kind === 'account') buildAccountSheet();
+  else if (s.kind === 'vault-open') buildVaultOpenSheet();
+  else if (s.kind === 'vault-set') buildVaultSetSheet();
+  else if (s.kind === 'delete-account') buildDeleteAccountSheet();
 }
 
 /** Where a length sits on the stretch bar: the first half for up to two hours, the rest up to twelve. */
@@ -1959,6 +2205,7 @@ function buildMenuSheet() {
           }, '달력 지우기 (모든 사람에게서)')
         : null),
     inApp ? null : fontPicker(),
+    accountBox(),
     !inApp && saved.get('golden.find')
       ? h('button', { class: 'btn ghost block golden-again', onClick: () => openReplace({ kind: 'golden' }) }, '🏆 황금 젤리 코드 보기')
       : null,
@@ -2098,6 +2345,175 @@ function buildNewGroupSheet() {
         run(e.currentTarget, () => joinGroup(c, who), '공유 달력에 들어왔어요');
       },
     }, '초대 코드로 들어가기'),
+  );
+}
+
+/** "내 계정" in the menu: who is signed in, and what can be done about it. */
+function accountBox() {
+  const who = store.account();
+  if (!who) return null;
+  const line = who.kind === 'id'
+    ? `아이디 ‘${who.id}’로 로그인했어요.`
+    : who.kind === 'google'
+      ? `구글 ${who.email}로 로그인했어요.${saved.get('vault') ? '' : ' 열쇠 비밀번호를 정해 두면 새 휴대폰에서도 달력이 바로 열려요.'}`
+      : '계정 없이 쓰고 있어요. 계정을 만들어 두면 새 휴대폰에서도 이어서 쓸 수 있어요.';
+  return h('div', { class: 'account-box', 'data-testid': 'account-box' },
+    h('div', { class: 'day-title', style: { margin: '18px 0 6px' } }, '내 계정'),
+    h('p', { class: 'account-note' }, line),
+    h('div', { class: 'menu-list' },
+      who.kind === 'guest'
+        ? h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'account' }), 'data-testid': 'make-account' }, '계정 만들기')
+        : null,
+      who.kind === 'google' && !saved.get('vault')
+        ? h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'vault-set' }), 'data-testid': 'vault-set' }, '열쇠 비밀번호 정하기 (새 휴대폰용)')
+        : null,
+      who.kind !== 'guest'
+        ? h('button', { class: 'btn ghost block', onClick: signOutHere, 'data-testid': 'sign-out' }, '로그아웃')
+        : null,
+      who.kind !== 'guest'
+        ? h('button', { class: 'btn ghost block danger-text', onClick: () => openReplace({ kind: 'delete-account' }), 'data-testid': 'delete-account' }, '계정 지우기')
+        : null));
+}
+
+/** Clears this phone of the calendars and their keys (they stay in the account's vault). */
+function clearDevice() {
+  for (const id of [...groups.keys()]) unwatchGroup(id);
+  for (const id of savedSpaces()) saved.set(`key.${id}`, null);
+  rememberSpaces([]);
+  for (const key of ['space', 'vault', 'vaultLock', 'golden.keys']) saved.set(key, null);
+  state.uid = null;
+  state.spaceId = null;
+  state.space = null;
+  state.members = [];
+  state.jellies = [];
+  screen = null;
+}
+
+async function signOutHere() {
+  const who = store.account();
+  const warn = who?.kind === 'google' && !saved.get('vault')
+    ? '로그아웃할까요? 열쇠 비밀번호를 정하지 않아서, 다시 로그인하면 함께 쓰는 사람에게 초대 코드를 받아야 달력이 열려요.'
+    : '로그아웃할까요? 이 휴대폰에서 공유 달력이 닫혀요. 다시 로그인하면 그대로 열려요.';
+  if (!confirm(warn)) return;
+  clearTimeout(vaultTimer);
+  closeSheet();
+  clearDevice();
+  await store.signOutAccount().catch((e) => console.warn(e));
+  render();
+  toast('로그아웃했어요');
+}
+
+/** A guest from before accounts makes one; their calendars stay theirs. */
+function buildAccountSheet() {
+  sheetFrame(
+    h('div', { class: 'day-title', style: { marginBottom: '4px' } }, '계정 만들기'),
+    h('p', { class: 'sheet-sub' }, '지금 쓰는 공유 달력은 그대로 이어져요. 새 휴대폰에서는 로그인만 하면 열려요.'),
+    accountForm({ link: true }),
+  );
+}
+
+/** Google, on a new phone: the vault password opens the calendars kept in the vault. */
+function buildVaultOpenSheet() {
+  const code = state.sheet.code || '';
+  const box = h('input', { class: 'input', style: { width: '100%' }, type: 'password', placeholder: '열쇠 비밀번호', 'data-testid': 'vault-pass' });
+  sheetFrame(
+    h('div', { class: 'day-title', style: { marginBottom: '4px' } }, '열쇠 비밀번호'),
+    h('p', { class: 'sheet-sub' }, '예전에 정한 열쇠 비밀번호를 넣으면 쓰던 공유 달력이 이 휴대폰에서도 열려요.'),
+    box,
+    h('button', {
+      class: 'btn block',
+      style: { marginTop: '12px' },
+      'data-testid': 'vault-open',
+      onClick: async (e) => {
+        const button = e.currentTarget;
+        button.disabled = true;
+        try {
+          const raw = await store.googleVaultSecret(box.value);
+          await store.readVault(raw);
+          const restored = await restoreFromVault(raw, 'passphrase');
+          closeSheet();
+          enterAccount(code);
+          toast(`쓰던 공유 달력 ${restored}개를 열었어요`);
+        } catch (err) {
+          console.warn(err);
+          toast('열쇠 비밀번호가 맞지 않아요');
+          button.disabled = false;
+        }
+      },
+    }, '달력 열기'),
+    h('button', {
+      class: 'btn ghost block',
+      style: { marginTop: '8px' },
+      onClick: () => {
+        saved.set('vaultLock', 'passphrase');
+        closeSheet();
+        enterAccount(code);
+      },
+    }, '나중에 할게요 (초대 코드로 들어가기)'),
+  );
+}
+
+/** Google: a separate vault password, so a new phone can open the calendars without invites. */
+function buildVaultSetSheet() {
+  const first = h('input', { class: 'input', style: { width: '100%' }, type: 'password', placeholder: `열쇠 비밀번호 (${store.MIN_PASSWORD}자 이상)`, autocomplete: 'new-password', 'data-testid': 'vault-new' });
+  const again = h('input', { class: 'input', style: { width: '100%', marginTop: '8px' }, type: 'password', placeholder: '한 번 더', autocomplete: 'new-password', 'data-testid': 'vault-again' });
+  sheetFrame(
+    h('div', { class: 'day-title', style: { marginBottom: '4px' } }, '열쇠 비밀번호 정하기'),
+    h('p', { class: 'sheet-sub' }, '공유 달력의 열쇠를 이 비밀번호로 잠가 보관해요. 구글도, 서버를 운영하는 사람도 열 수 없어요. 잊으면 되찾을 수 없으니 잘 기억해 주세요.'),
+    first,
+    again,
+    h('button', {
+      class: 'btn block',
+      style: { marginTop: '12px' },
+      'data-testid': 'vault-save',
+      onClick: async (e) => {
+        if (first.value.length < store.MIN_PASSWORD) return toast(`${store.MIN_PASSWORD}자 이상으로 정해 주세요`);
+        if (first.value !== again.value) return toast('두 번 넣은 비밀번호가 달라요');
+        e.currentTarget.disabled = true;
+        saved.set('vault', await store.googleVaultSecret(first.value));
+        saved.set('vaultLock', 'passphrase');
+        syncVault();
+        closeSheet();
+        toast('열쇠 비밀번호를 정했어요');
+      },
+    }, '정하기'),
+  );
+}
+
+/** Deletes the account: leaves every calendar first (a calendar left empty goes with it). */
+function buildDeleteAccountSheet() {
+  const who = store.account();
+  const pw = who?.kind === 'id'
+    ? h('input', { class: 'input', style: { width: '100%' }, type: 'password', placeholder: '비밀번호', autocomplete: 'current-password', 'data-testid': 'delete-password' })
+    : null;
+  sheetFrame(
+    h('div', { class: 'day-title', style: { marginBottom: '4px' } }, '계정 지우기'),
+    h('p', { class: 'sheet-sub' }, '계정과 열쇠 보관함을 지우고, 들어가 있는 공유 달력에서 모두 나가요. 혼자 남아 있던 달력은 젤리와 메모까지 함께 지워져요. 되돌릴 수 없어요.'),
+    pw,
+    h('button', {
+      class: 'btn danger block',
+      style: { marginTop: '12px' },
+      'data-testid': 'delete-account-confirm',
+      onClick: async (e) => {
+        const button = e.currentTarget;
+        button.disabled = true;
+        try {
+          if (pw) await store.confirmPassword(pw.value);
+          for (const id of savedSpaces()) await store.leave(id).catch((err) => console.warn(err));
+          await store.deleteAccount();
+        } catch (err) {
+          console.error(err);
+          toast(err?.code === 'auth/requires-recent-login' ? '보안을 위해 로그아웃했다가 다시 로그인한 뒤 지워 주세요' : idError(err));
+          button.disabled = false;
+          return;
+        }
+        clearTimeout(vaultTimer);
+        closeSheet();
+        clearDevice();
+        render();
+        toast('계정을 지웠어요');
+      },
+    }, '계정 지우기'),
   );
 }
 

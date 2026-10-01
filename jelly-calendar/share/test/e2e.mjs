@@ -81,8 +81,14 @@ const shot = (page, name) => page.screenshot({ path: `${OUT}${name}.png`, fullPa
 const tid = (page, id) => page.locator(`[data-testid="${id}"]`);
 
 try {
-  // 1. Galaxy (창현) makes the shared calendar and an invite.
+  // 1. Galaxy (창현) makes an account, the shared calendar and an invite.
   await a.goto(BASE);
+  await tid(a, 'account-step').waitFor();
+  await tid(a, 'account-id').fill('changhyun');
+  await tid(a, 'account-password').fill('jelly-pass-1');
+  await tid(a, 'sign-up').click();
+  await tid(a, 'name').waitFor();
+  check((await tid(a, 'signed-in').textContent()).includes('changhyun'), 'galaxy: makes an account with a login ID');
   await tid(a, 'name').fill('창현');
   await tid(a, 'create').click();
   await tid(a, 'month').waitFor();
@@ -96,8 +102,12 @@ try {
   await shot(a, '2-galaxy-invite');
   await a.goBack();
 
-  // 2. iPhone (지은) opens the invite link and joins.
+  // 2. iPhone (지은) opens the invite link, makes an account and joins.
   await b.goto(`${BASE}#c=${code.replace('-', '')}`);
+  await tid(b, 'account-step').waitFor();
+  await tid(b, 'account-id').fill('jieun.22');
+  await tid(b, 'account-password').fill('jelly-pass-2');
+  await tid(b, 'sign-up').click();
   await tid(b, 'code').waitFor();
   check((await tid(b, 'code').inputValue()) === code, 'iphone: code filled in from the link');
   await shot(b, '3-iphone-welcome');
@@ -332,6 +342,44 @@ try {
   await tid(a, 'group-list').locator('.group-row').first().click();
   await a.waitForFunction(() => document.querySelector('[data-testid="groups"]')?.textContent.includes('공유 젤리 달력'));
   check((await a.locator(`[data-day="${month}-17"] .mini`).count()) === 1, 'galaxy: back on the first calendar');
+
+  // 7c. A new phone: signing in with the ID brings both calendars back, without an invite.
+  const phone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 3,
+    isMobile: true,
+    hasTouch: true,
+    locale: 'ko-KR',
+    reducedMotion: 'reduce',
+    timezoneId: 'Asia/Seoul',
+  });
+  const c = await phone.newPage();
+  c.on('pageerror', (e) => console.error('[new phone] page error', e));
+  c.on('dialog', (d) => d.accept());
+  await c.goto(BASE);
+  await tid(c, 'account-id').fill('changhyun');
+  await tid(c, 'account-password').fill('wrong-password');
+  await tid(c, 'sign-in').click();
+  await c.locator('.toast', { hasText: '아이디나 비밀번호가 맞지 않아요' }).waitFor({ timeout: 10000 });
+  check(true, 'new phone: a wrong password is turned away');
+  await tid(c, 'account-password').fill('jelly-pass-1');
+  await tid(c, 'sign-in').click();
+  await tid(c, 'month').waitFor({ timeout: 15000 });
+  await c.locator(`[data-day="${month}-17"] .mini`).first().waitFor({ timeout: 15000 });
+  check(true, 'new phone: signing in opens the calendar with its jellies');
+  await tid(c, 'groups').click();
+  check((await tid(c, 'group-list').locator('.group-row').count()) === 2, 'new phone: both calendars came back from the vault');
+  await shot(c, '10d-new-phone-groups');
+  await c.goBack();
+  await tid(c, 'menu').click();
+  await tid(c, 'sign-out').click();
+  await tid(c, 'account-step').waitFor();
+  check(await c.evaluate(() => !Object.keys(localStorage).some((k) => k.startsWith('jellyShare.key.'))), 'new phone: signing out leaves no calendar keys behind');
+  await phone.close();
+
+  // The vault on the server is sealed too.
+  const vaults = await rawDocs('users');
+  check(vaults.includes('"vault"') && !vaults.includes('공유 젤리 달력') && !vaults.includes('재훈'), 'the key vault on the server is sealed');
 
   // 8. Inside the app's "모두" tab: the phone's own jellies and the shared ones in one box.
   const app = await galaxy.newPage();

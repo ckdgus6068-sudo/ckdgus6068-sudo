@@ -223,6 +223,30 @@ describe('joining and members', () => {
   });
 });
 
+describe('key vaults', () => {
+  const vault = (extra = {}) => ({ v: 1, lock: 'password', vault: S(400), updatedAt: serverTimestamp(), ...extra });
+  const account = (uid) => env.authenticatedContext(uid, { firebase: { sign_in_provider: 'password' } }).firestore();
+  const guest = (uid) => env.authenticatedContext(uid, { firebase: { sign_in_provider: 'anonymous' } }).firestore();
+
+  test('an account keeps its own vault, and nobody else reads it', async () => {
+    await assertSucceeds(setDoc(doc(account('alice'), 'users/alice'), vault()));
+    await assertSucceeds(getDoc(doc(account('alice'), 'users/alice')));
+    await assertSucceeds(setDoc(doc(account('alice'), 'users/alice'), vault({ lock: 'passphrase', vault: S(900) })));
+    await assertFails(getDoc(doc(account('bob'), 'users/alice')));
+    await assertFails(setDoc(doc(account('bob'), 'users/alice'), vault()));
+    await assertFails(getDocs(collection(account('bob'), 'users')));
+    await assertSucceeds(deleteDoc(doc(account('alice'), 'users/alice')));
+  });
+
+  test('a vault is sealed, small, and only for accounts', async () => {
+    await assertFails(setDoc(doc(account('alice'), 'users/alice'), vault({ vault: '{"spaces":[]}' })));
+    await assertFails(setDoc(doc(account('alice'), 'users/alice'), vault({ vault: S(20001) })));
+    await assertFails(setDoc(doc(account('alice'), 'users/alice'), vault({ lock: 'none' })));
+    await assertFails(setDoc(doc(account('alice'), 'users/alice'), vault({ extra: 1 })));
+    await assertFails(setDoc(doc(guest('carol'), 'users/carol'), vault()));
+  });
+});
+
 describe('invites', () => {
   test('members make invites; anyone signed in reads one by its id; nobody lists them', async () => {
     await aliceMakesSpace();

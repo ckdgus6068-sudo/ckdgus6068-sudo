@@ -7,10 +7,12 @@ rules_version = '2';
 // spaces/{spaceId}/jellies/{jellyId}       the shared jellies; every content field is sealed
 // spaces/{spaceId}/jellies/{id}/memos/{m}  memos on a jelly, sealed
 // invites/{id}                             a short-lived invite; its id comes from the invite code
+// users/{uid}                              an account's key vault: its calendar keys, sealed
 //
-// Everyone signs in anonymously. Content is sealed on the members' devices with a key the server
-// never sees (docs/share/crypto.js), so these rules decide who may read and write what, and how
-// big a sealed value may be. Joining a calendar takes a live invite to that very calendar.
+// People sign in with an account (a login ID, or Google); those from before accounts are signed in
+// anonymously. Content is sealed on the members' devices with a key the server never sees
+// (docs/share/crypto.js), so these rules decide who may read and write what, and how big a sealed
+// value may be. Joining a calendar takes a live invite to that very calendar.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -159,6 +161,19 @@ service cloud.firestore {
                 || !existsAfter(/databases/$(database)/documents/spaces/$(spaceId)/jellies/$(jellyId)));
         }
       }
+    }
+
+    // Only the account itself reads or replaces its vault; a guest from before accounts has none.
+    match /users/{userId} {
+      allow read, delete: if signedIn() && request.auth.uid == userId;
+      allow create, update: if signedIn()
+        && request.auth.uid == userId
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.keys().hasOnly(['v', 'lock', 'vault', 'updatedAt'])
+        && request.resource.data.v == 1
+        && request.resource.data.lock in ['password', 'passphrase']
+        && sealed(request.resource.data.vault, 20000)
+        && request.resource.data.updatedAt == request.time;
     }
 
     match /invites/{inviteId} {

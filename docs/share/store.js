@@ -1,13 +1,26 @@
 // Data for shared jellies, kept in Cloud Firestore and encrypted end to end (see crypto.js).
 //
-// What the server can see: anonymous user ids, who is in which calendar and who owns it, when
-// things were written, how many memos a jelly has, and sealed values. Names, colours, titles,
-// dates, times, lengths, notes and memos are sealed on the members' devices with the calendar's
-// key, which never leaves them except wrapped inside an invite. Access rules:
+// What the server can see: user ids (and an account's login ID or Google address), who is in which
+// calendar and who owns it, when things were written, how many memos a jelly has, and sealed
+// values. Names, colours, titles, dates, times, lengths, notes and memos are sealed on the members'
+// devices with the calendar's key, which never leaves them except wrapped inside an invite or
+// inside the owner's own key vault, locked with a key only their password makes. Access rules:
 // jelly-calendar/share/firestore.rules.
 import {
+  EmailAuthProvider,
+  GoogleAuthProvider,
   Timestamp,
   browserLocalPersistence,
+  browserPopupRedirectResolver,
+  createUserWithEmailAndPassword,
+  deleteUser,
+  linkWithCredential,
+  linkWithPopup,
+  reauthenticateWithCredential,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
   collection,
   connectAuthEmulator,
   connectFirestoreEmulator,
@@ -29,11 +42,10 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  signInAnonymously,
   updateDoc,
   writeBatch,
 } from './vendor/firebase.js';
-import { fromBase64Url, importKey, inviteSecrets, newSpaceKey, open, seal, toBase64Url } from './crypto.js';
+import { accountSecrets, fromBase64Url, importKey, inviteSecrets, newSpaceKey, open, seal, toBase64Url, vaultSecret } from './crypto.js';
 
 const INVITE_DAYS = 3;
 // Crockford's base32 without the letters that look like digits.
@@ -73,6 +85,7 @@ export function prettyCode(code) {
 }
 
 /** Starts Firebase and signs in anonymously. Resolves with the user id. */
+/** Connects to Firebase. Resolves with the signed-in user's id, or null when nobody is signed in. */
 export async function start(config, { emulator = false } = {}) {
   const app = initializeApp(config);
   let cache;
@@ -82,26 +95,153 @@ export async function start(config, { emulator = false } = {}) {
     cache = memoryLocalCache();
   }
   db = initializeFirestore(app, { localCache: cache });
-  // Anonymous sign-in only, so no pop-up or redirect helpers (they would load extra Google scripts).
-  auth = initializeAuth(app, { persistence: [indexedDBLocalPersistence, browserLocalPersistence] });
+  auth = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+    popupRedirectResolver: browserPopupRedirectResolver,
+  });
   if (emulator) {
     connectAuthEmulator(auth, `http://${location.hostname}:9099`, { disableWarnings: true });
     connectFirestoreEmulator(db, location.hostname, 8080);
   }
   const user = await new Promise((resolve, reject) => {
     const stop = onAuthStateChanged(auth, (u) => {
-      if (u) {
-        stop();
-        resolve(u);
-      }
+      stop();
+      resolve(u);
     }, reject);
-    if (!auth.currentUser) signInAnonymously(auth).catch(reject);
   });
-  return user.uid;
+  return user?.uid ?? null;
 }
 
 export function uid() {
   return auth?.currentUser?.uid ?? null;
+}
+
+// ---------------------------------------------------------------- accounts
+
+// A login ID becomes the address of an email account that never receives mail.
+const ID_DOMAIN = 'id.jelly-calendar.invalid';
+export const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{3,19}$/;
+export const MIN_PASSWORD = 8;
+
+export function cleanId(text) {
+  return String(text || '').trim().toLowerCase();
+}
+
+/**
+ * Who is signed in: null; { kind: 'guest' } from before accounts; { kind: 'id', id };
+ * or { kind: 'google', email }.
+ */
+export function account() {
+  const u = auth?.currentUser;
+  if (!u) return null;
+  if (u.isAnonymous) return { kind: 'guest' };
+  const google = u.providerData.find((p) => p.providerId === 'google.com');
+  if (google) return { kind: 'google', email: google.email || u.email || '' };
+  const email = u.email || '';
+  if (email.endsWith(`@${ID_DOMAIN}`)) return { kind: 'id', id: email.slice(0, -(ID_DOMAIN.length + 1)) };
+  return { kind: 'other' };
+}
+
+/**
+ * Makes an account with a login ID. Someone already in calendars from before accounts keeps them:
+ * the account is added to the same user. Resolves with the raw vault key.
+ */
+export async function signUpWithId(id, password) {
+  const secrets = await accountSecrets(id, password);
+  const email = `${id}@${ID_DOMAIN}`;
+  const current = auth.currentUser;
+  if (current?.isAnonymous) await linkWithCredential(current, EmailAuthProvider.credential(email, secrets.signIn));
+  else await createUserWithEmailAndPassword(auth, email, secrets.signIn);
+  return secrets.vault;
+}
+
+/** Signs in with a login ID. Resolves with the raw vault key. */
+export async function signInWithId(id, password) {
+  const secrets = await accountSecrets(id, password);
+  await signInWithEmailAndPassword(auth, `${id}@${ID_DOMAIN}`, secrets.signIn);
+  return secrets.vault;
+}
+
+/**
+ * Google: with an ID token from the Android app, or a pop-up in a browser. Someone from before
+ * accounts keeps their calendars, as with a login ID.
+ */
+export async function signInWithGoogle(idToken) {
+  const current = auth.currentUser;
+  if (idToken) {
+    const credential = GoogleAuthProvider.credential(idToken);
+    if (current?.isAnonymous) await linkWithCredential(current, credential);
+    else await signInWithCredential(auth, credential);
+  } else {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    if (current?.isAnonymous) await linkWithPopup(current, provider);
+    else await signInWithPopup(auth, provider);
+  }
+}
+
+/** The vault key of a Google account, from its separate vault password. */
+export function googleVaultSecret(passphrase) {
+  return vaultSecret(uid(), passphrase);
+}
+
+/** Signs out and drops the calendar keys from memory (the page clears what it saved). */
+export async function signOutAccount() {
+  await signOut(auth);
+  keys.clear();
+  opened.clear();
+}
+
+/** Asks for the password again before something that cannot be undone (ID accounts). */
+export async function confirmPassword(password) {
+  const user = auth.currentUser;
+  const who = account();
+  if (who?.kind !== 'id') return;
+  const secrets = await accountSecrets(who.id, password);
+  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, secrets.signIn));
+}
+
+/** Deletes the account itself and its vault (after the page has left every calendar). */
+export async function deleteAccount() {
+  const user = auth.currentUser;
+  await deleteDoc(doc(db, 'users', user.uid)).catch(() => {});
+  await deleteUser(user);
+  keys.clear();
+  opened.clear();
+}
+
+// ---------------------------------------------------------------- the key vault
+
+const vaultAt = (id) => `users/${id}#vault`;
+
+/**
+ * Locks [contents] (the calendar keys of this phone) into the account's vault with [vaultRaw].
+ * [lock] says where the key comes from: the login 'password', or a separate 'passphrase'.
+ */
+export async function saveVault(vaultRaw, contents, lock = 'password') {
+  const me = uid();
+  const key = await importKey(fromBase64Url(vaultRaw));
+  await setDoc(doc(db, 'users', me), {
+    v: 1,
+    lock,
+    vault: await seal(key, contents, vaultAt(me)),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** How the account's vault is locked ('password' or 'passphrase'), or null when it has none. */
+export async function vaultLock() {
+  const snap = await getDoc(doc(db, 'users', uid()));
+  return snap.exists() ? snap.data().lock ?? null : null;
+}
+
+/** Opens the account's vault; null when there is none. Throws when [vaultRaw] is the wrong key. */
+export async function readVault(vaultRaw) {
+  const me = uid();
+  const snap = await getDoc(doc(db, 'users', me));
+  if (!snap.exists() || typeof snap.data().vault !== 'string') return null;
+  const key = await importKey(fromBase64Url(vaultRaw));
+  return open(key, snap.data().vault, vaultAt(me));
 }
 
 // ---------------------------------------------------------------- keys and sealing

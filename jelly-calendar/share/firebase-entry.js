@@ -2,12 +2,24 @@
 // docs/share/vendor/firebase.js, so the page needs no build step and no third-party script host.
 export { initializeApp } from 'firebase/app';
 export {
+  EmailAuthProvider,
+  GoogleAuthProvider,
   browserLocalPersistence,
+  browserPopupRedirectResolver,
   connectAuthEmulator,
+  createUserWithEmailAndPassword,
+  deleteUser,
   indexedDBLocalPersistence,
   initializeAuth,
+  linkWithCredential,
+  linkWithPopup,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   signInAnonymously,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
 } from 'firebase/auth';
 export {
   Timestamp,

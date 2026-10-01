@@ -1354,3 +1354,54 @@ body.fill #app {
   display: inline-flex;
 }
 
+/* ---------- accounts ---------- */
+
+.account-form {
+  margin-top: 8px;
+}
+
+.account-buttons {
+  margin-top: 12px;
+}
+
+.account-buttons .btn {
+  flex: 1;
+}
+
+.account-note {
+  color: var(--text-sub);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 10px 0 0;
+  word-break: keep-all;
+}
+
+.google-btn {
+  background: var(--surface);
+  color: var(--text);
+  border: 1.5px solid var(--line-strong);
+}
+
+.google-g {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+  background: conic-gradient(#ea4335 0 25%, #fbbc05 0 50%, #34a853 0 75%, #4285f4 0);
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.link-btn {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: inherit;
+  text-decoration: underline;
+}
+

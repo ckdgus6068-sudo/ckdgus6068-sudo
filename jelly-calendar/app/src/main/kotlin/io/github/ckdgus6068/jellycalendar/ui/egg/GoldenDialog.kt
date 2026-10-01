@@ -40,7 +40,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** Who finders are sent to. The shared page says the same (docs/share/app.js: MAKER). */
-const val MAKER_NAME = "황OO"
+const val MAKER_NAME = "‘대 AI 시대의 딸깍 개발자’ 황창현"
 
 private val FOUND_AT = DateTimeFormatter.ofPattern("yyyy년 M월 d일 a h:mm", Locale.KOREAN)
 
