@@ -95,9 +95,19 @@ try {
   await tid(a, 'name').waitFor();
   check((await tid(a, 'signed-in').textContent()).includes('changhyun'), 'galaxy: makes an account with a login ID');
   await tid(a, 'name').fill('창현');
+  check((await tid(a, 'look-open').textContent()).includes('얼굴'), 'galaxy: starts with the plain smiling face');
+  await tid(a, 'look-open').click();
+  await tid(a, 'look-grid').waitFor();
+  check((await tid(a, 'look-grid').locator('.look-cell').count()) === 43, 'galaxy: 43 looks to pick from (plain, face x2, 20 jobs x2)');
+  await shot(a, '1a-galaxy-look-picker');
+  await tid(a, 'look-police-0').click();
+  await tid(a, 'look-grid').waitFor({ state: 'detached' });
+  check((await tid(a, 'look-open').textContent()).includes('경찰관'), 'galaxy: picks the police character');
   await tid(a, 'create').click();
   await tid(a, 'month').waitFor();
   check((await tid(a, 'month').textContent()).includes('월'), 'galaxy: shared calendar created');
+  await a.locator('.look-avatar[data-look="police-0"]').first().waitFor({ timeout: 10000 });
+  check(true, 'galaxy: shows itself as the police character');
   await shot(a, '1-galaxy-empty');
   await tid(a, 'menu').click();
   await tid(a, 'invite').click();
@@ -117,9 +127,15 @@ try {
   check((await tid(b, 'code').inputValue()) === code, 'iphone: code filled in from the link');
   await shot(b, '3-iphone-welcome');
   await tid(b, 'name').fill('지은');
+  await tid(b, 'look-open').click();
+  await tid(b, 'look-judge-1').click();
+  await tid(b, 'look-grid').waitFor({ state: 'detached' });
   await tid(b, 'join').click();
   await tid(b, 'month').waitFor();
   check(true, 'iphone: joined');
+  await b.locator('.look-avatar[data-look="police-0"]').first().waitFor({ timeout: 10000 });
+  await a.locator('.look-avatar[data-look="judge-1"]').first().waitFor({ timeout: 10000 });
+  check(true, 'each phone sees the other one\'s character');
 
   // 3. Galaxy puts up a jelly on the 10th; the iPhone sees it without reloading.
   const month = await a.evaluate(() => {
@@ -239,6 +255,11 @@ try {
   await tid(a, 'day-head').waitFor();
   await settled(a, 2);
   check((await tid(a, 'day-head').textContent()).includes('17일'), 'galaxy box: opens on the selected day');
+  const worn = await a.evaluate(() => [...window.__jellyBox.byKey.values()].map((it) => `${it.title}:${it.look ? `${it.look.job}-${it.look.v}` : 'none'}`).sort());
+  check(
+    worn.includes('부모님 생신:police-0') && worn.includes('케이크 찾기:judge-1'),
+    `galaxy box: each jelly wears the character of who put it up (${worn.join(', ')})`,
+  );
   await a.waitForTimeout(600);
   await shot(a, '8-galaxy-box');
 

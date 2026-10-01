@@ -3,6 +3,7 @@ import { firebaseConfig, googleSignIn, publicUrl } from './config.js';
 import * as store from './store.js';
 import { JellyBox, GOLDEN_FLAVOR, setTitleFace } from './box.js';
 import { holidayOn } from './holidays.js';
+import { cleanLook, lookName, lookSvg, LOOK_JOBS, sameLook } from './character.js';
 
 // ---------------------------------------------------------------- look
 
@@ -77,11 +78,25 @@ const standalone = window.matchMedia?.('(display-mode: standalone)').matches || 
 const bridge = window.JellyBridge || null;
 
 const savedColor = Number.parseInt(saved.get('color') ?? '', 10);
+
+/** The character of someone who has not picked one yet: the plain smiling face. */
+const FIRST_LOOK = { job: 'face', v: 0 };
+
+/** The character kept on this phone: null for a plain jelly ("민무늬"). */
+function savedLook() {
+  const raw = saved.get('look');
+  if (raw == null) return FIRST_LOOK;
+  if (raw === 'none') return null;
+  return cleanLook(readJson(raw, null)) ?? FIRST_LOOK;
+}
+
 const state = {
   uid: null,
   myName: saved.get('name') || '',
   // My colour (a flavour index): my name's circle, and the colour my new jellies start with.
   myColor: savedColor >= 0 && savedColor < 10 ? savedColor : Math.floor(Math.random() * 10),
+  // My jelly character ({ job, v }, or null for a plain jelly), the same in every calendar.
+  myLook: savedLook(),
   spaceId: saved.get('space'),
   space: null,
   members: [],
@@ -108,6 +123,8 @@ const subs = { space: null, members: null, jellies: null, jelly: null, memos: nu
 let ready = false;
 let screen = null; // what #app shows: 'welcome' | 'legacy' | 'month' | 'shared-box' | 'all'
 let pendingCode = '';
+// Paints the welcome page's colour and character again (after a character was picked on a sheet).
+let welcomeRepaint = null;
 let testMode = false;
 
 // ---------------------------------------------------------------- dates
@@ -294,8 +311,24 @@ function subject(uid, fallback, members = state.members) {
   return uid === state.uid ? '내가' : realName(uid, fallback, members);
 }
 
+/** The light colour of someone's jelly character. */
+function memberBody(uid, members = state.members) {
+  const flavor = memberFlavor(uid, members);
+  return flavor == null ? MEMBER_COLORS[memberIndex(uid, members) % MEMBER_COLORS.length] : FLAVORS[flavor].base;
+}
+
+/** Someone's character, or null for a plain jelly or a profile from before characters. */
+function memberLook(uid, members = state.members) {
+  return cleanLook(members.find((m) => m.uid === uid)?.look);
+}
+
 function avatar(uid, fallback, small = false, members = state.members) {
   const name = realName(uid, fallback, members);
+  const look = memberLook(uid, members);
+  if (look) {
+    return h('span', { class: `avatar look-avatar${small ? ' small' : ''}`, title: name, 'data-look': `${look.job}-${look.v}` },
+      lookSvg(look, memberBody(uid, members), small ? 26 : 38));
+  }
   return h(
     'span',
     { class: `avatar${small ? ' small' : ''}`, style: { background: memberColor(uid, members), color: memberInk(uid, members) }, title: name },
@@ -417,8 +450,18 @@ function readHost() {
   if (next && next.mode !== 'all') next = { ...next, mode: 'shared' };
   if (next?.mode === 'all' && !/^\d{4}-\d{2}-\d{2}$/.test(next.date || '')) next = { ...next, mode: 'shared' };
   const changedMode = (state.host?.mode || 'shared') !== (next?.mode || 'shared');
+  const changedLook = !sameLook(state.host?.look, next?.look);
   state.host = next;
   if (next?.font) applyFont(next.font);
+  // An app that keeps characters but has none yet takes the one picked here before.
+  if (next && !('look' in next) && bridge?.setLook && !lookHandedOver) {
+    lookHandedOver = true;
+    bridge.setLook(JSON.stringify(state.myLook ?? PLAIN));
+  }
+  // A character picked in the app's settings goes into every calendar.
+  if (changedLook) {
+    for (const [id, g] of groups) keepLook(id, g.members.find((m) => m.uid === state.uid));
+  }
   // A sheet from one tab should not stay open over the other one.
   if (changedMode && state.sheet) closeSheet();
 }
@@ -473,7 +516,7 @@ function syncVault() {
   clearTimeout(vaultTimer);
   vaultTimer = setTimeout(() => {
     const spaces = savedSpaces().map((id) => ({ id, key: saved.get(`key.${id}`) })).filter((x) => x.key);
-    store.saveVault(raw, { spaces, profile: { name: state.myName, color: state.myColor } }, saved.get('vaultLock') || 'password')
+    store.saveVault(raw, { spaces, profile: { name: state.myName, color: state.myColor, look: state.myLook } }, saved.get('vaultLock') || 'password')
       .catch((e) => console.warn('vault not saved', e));
   }, 300);
 }
@@ -498,6 +541,7 @@ async function restoreFromVault(raw, lock) {
   rememberSpaces([...new Set([...savedSpaces(), ...kept.map((x) => x.id)])]);
   const profile = contents?.profile;
   if (profile?.name) rememberProfile(profile.name, Number.isInteger(profile.color) ? profile.color : state.myColor);
+  if (profile && 'look' in profile) rememberLook(profile.look);
   return kept.length;
 }
 
@@ -670,7 +714,7 @@ function accountForm({ code = '', link = false } = {}) {
 /** Makes a calendar named [groupName] with me in it under [profile], and shows it. */
 async function createGroup(groupName, profile) {
   rememberProfile(profile.name, profile.color);
-  const { spaceId, key } = await store.createSpace(groupName || '공유 젤리 달력', profile);
+  const { spaceId, key } = await store.createSpace(groupName || '공유 젤리 달력', { ...profile, look: myLook() });
   saved.set(`key.${spaceId}`, key);
   openSpace(spaceId);
 }
@@ -678,7 +722,7 @@ async function createGroup(groupName, profile) {
 /** Joins the calendar of an invite code under [profile], and shows it. */
 async function joinGroup(code, profile) {
   rememberProfile(profile.name, profile.color);
-  const { spaceId, key } = await store.joinWithCode(code, profile);
+  const { spaceId, key } = await store.joinWithCode(code, { ...profile, look: myLook() });
   saved.set(`key.${spaceId}`, key);
   openSpace(spaceId);
 }
@@ -719,11 +763,16 @@ function renderWelcome(code = '') {
     'data-testid': 'name',
   });
   const colors = h('div', { class: 'row' });
-  const paintColors = () => colors.replaceChildren(...colorSwatches(color, (i) => {
-    color = i;
-    paintColors();
-  }));
+  const lookBox = h('div');
+  const paintColors = () => {
+    colors.replaceChildren(...colorSwatches(color, (i) => {
+      color = i;
+      paintColors();
+    }));
+    lookBox.replaceChildren(lookRow(color, () => openSheet({ kind: 'look', color })));
+  };
   paintColors();
+  welcomeRepaint = paintColors;
   const codeBox = h('input', {
     class: 'input code-input',
     placeholder: 'ABCDE-23456',
@@ -799,6 +848,8 @@ function renderWelcome(code = '') {
       name,
       h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
       colors,
+      h('div', { class: 'field-label' }, '내 캐릭터'),
+      lookBox,
       code
         ? [
             h('div', { class: 'field-label' }, '받은 초대 코드'),
@@ -846,6 +897,65 @@ function rememberProfile(n, color) {
   state.myColor = color;
   saved.set('name', n);
   saved.set('color', String(color));
+}
+
+/** Inside an app that keeps my character in its settings (newer versions hand it over). */
+function appKeepsLook() {
+  return inApp && !!state.host && 'look' in state.host;
+}
+
+/** My character: the one in the app's settings when the app keeps it, else the one picked here. */
+function myLook() {
+  return appKeepsLook() ? cleanLook(state.host.look) : state.myLook;
+}
+
+// How the app is told about a plain jelly (an unknown job is plain everywhere).
+const PLAIN = { job: 'none', v: 0 };
+
+function rememberLook(look) {
+  state.myLook = cleanLook(look);
+  saved.set('look', state.myLook ? JSON.stringify(state.myLook) : 'none');
+}
+
+/** I picked a character: it goes into every calendar I am in (inside the app, the app keeps it). */
+function pickLook(look) {
+  const clean = cleanLook(look);
+  if (inApp && bridge?.setLook) {
+    bridge.setLook(JSON.stringify(clean ?? PLAIN));
+    return;
+  }
+  rememberLook(clean);
+  syncVault();
+  for (const [id, g] of groups) {
+    const mine = g.members.find((m) => m.uid === state.uid);
+    if (mine?.name && !sameLook(mine.look, clean)) {
+      store.updateProfile(id, { name: mine.name, color: mine.color, look: clean }).catch((e) => console.warn(e));
+    }
+  }
+}
+
+// Calendars whose profile is being given my character right now.
+const lookWrites = new Set();
+// The character picked here was handed to the app once.
+let lookHandedOver = false;
+
+/**
+ * Keeps my character the same in every calendar. Inside the app the app's choice wins. Here, a
+ * profile from before characters gets this phone's, and the calendar on screen tells this phone
+ * about one picked on another phone.
+ */
+function keepLook(id, mine) {
+  if (!mine?.name || lookWrites.has(id)) return;
+  if (!appKeepsLook() && mine.look !== undefined) {
+    if (id === state.spaceId && !sameLook(mine.look, state.myLook)) rememberLook(mine.look);
+    return;
+  }
+  const want = myLook();
+  if (mine.look !== undefined && sameLook(mine.look, want)) return;
+  lookWrites.add(id);
+  store.updateProfile(id, { name: mine.name, color: mine.color, look: want })
+    .catch((e) => console.warn(e))
+    .finally(() => lookWrites.delete(id));
 }
 
 // ---------------------------------------------------------------- space
@@ -915,12 +1025,11 @@ function watchGroup(id) {
   g.unsubs.push(store.watchMembers(id, (members) => {
     g.members = members;
     syncCurrent(id);
-    if (id === state.spaceId) {
-      const mine = members.find((m) => m.uid === state.uid);
-      if (mine?.name && (mine.name !== state.myName || mine.color !== state.myColor)) {
-        rememberProfile(mine.name, Number.isInteger(mine.color) ? mine.color : state.myColor);
-      }
+    const mine = members.find((m) => m.uid === state.uid);
+    if (id === state.spaceId && mine?.name && (mine.name !== state.myName || mine.color !== state.myColor)) {
+      rememberProfile(mine.name, Number.isInteger(mine.color) ? mine.color : state.myColor);
     }
+    keepLook(id, mine);
     render();
     if (id === state.spaceId) state.sheet?.repaint?.();
   }, lost));
@@ -1436,7 +1545,9 @@ function sharedItem(j, group = groups.get(state.spaceId)) {
     duration: j.duration,
     flavor: j.flavor,
     done: !!j.done,
-    badge: { text: initial(realName(j.by, j.byName, members)), color: memberColor(j.by, members), ink: memberInk(j.by, members) },
+    // Whoever put it up: their character on the jelly, or their first letter in a circle.
+    look: memberLook(j.by, members),
+    badge: memberLook(j.by, members) ? null : { text: initial(realName(j.by, j.byName, members)), color: memberColor(j.by, members), ink: memberInk(j.by, members) },
     gold: state.goldenKeys.has(`s:${j.id}`),
     pinned: !!j.pinned,
     ref: { kind: 'shared', id: j.id, spaceId: group?.id ?? state.spaceId },
@@ -1452,6 +1563,8 @@ function personalItem(p) {
     flavor: p.flavor ?? 0,
     done: !!p.done,
     badge: null,
+    // My own jellies wear my character only if I asked for that in the app's settings.
+    look: state.host?.lookOnMine ? myLook() : null,
     pinned: !!p.pinned,
     ref: { kind: 'personal', id: p.id },
   };
@@ -1623,7 +1736,7 @@ function renderAll() {
           ? state.members.slice(0, 4).map((m) => avatar(m.uid, m.name, true))
           : h('span', { class: 'avatar small', style: { background: MEMBER_COLORS[1] } }, '공'),
         `공유 젤리 ${shared.length}${shown.length > 1 ? ` · 달력 ${shown.length}개` : ''}`),
-      h('span', { class: 'legend-note' }, '동그라미 글자: 공유 젤리를 올린 사람')),
+      h('span', { class: 'legend-note' }, '젤리의 캐릭터나 동그라미 글자: 공유 젤리를 올린 사람')),
   );
   v.note.replaceChildren(...[
     shown.length
@@ -1682,6 +1795,7 @@ function buildSheet() {
   else if (s.kind === 'invite') buildInviteSheet();
   else if (s.kind === 'menu') buildMenuSheet();
   else if (s.kind === 'name') buildNameSheet();
+  else if (s.kind === 'look') buildLookSheet();
   else if (s.kind === 'golden') buildGoldenSheet();
   else if (s.kind === 'groups') buildGroupsSheet();
   else if (s.kind === 'new-group') buildNewGroupSheet();
@@ -2237,7 +2351,7 @@ function buildMenuSheet() {
     people,
     h('div', { class: 'menu-list' },
       h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'invite' }), 'data-testid': 'invite' }, '함께 쓸 사람 초대하기'),
-      h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'name' }), 'data-testid': 'profile' }, '내 이름과 색 바꾸기'),
+      h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'name' }), 'data-testid': 'profile' }, '내 이름 · 색 · 캐릭터 바꾸기'),
       h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'rename' }), 'data-testid': 'rename' }, '달력 이름 바꾸기'),
       h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'groups' }), 'data-testid': 'menu-groups' }, '다른 공유 달력 · 달력 더 만들기'),
       h('button', {
@@ -2652,21 +2766,71 @@ function buildAddSheet() {
   );
 }
 
+/** "내 캐릭터": my character as it looks in [color], tap to pick another. */
+function lookRow(color, onOpen) {
+  const look = myLook();
+  return h('button', { class: 'look-row', type: 'button', onClick: onOpen, 'data-testid': 'look-open' },
+    lookSvg(look, FLAVORS[color]?.base ?? MEMBER_COLORS[0], 58),
+    h('span', { class: 'look-row-text' },
+      h('strong', null, lookName(look)),
+      h('small', null, '눌러서 바꾸기 · 직업마다 두 가지')),
+    h('span', { class: 'look-row-go' }, '›'));
+}
+
+/** "내 캐릭터 고르기": the plain jelly, the plain face, and every job in two outfits. */
+function buildLookSheet() {
+  const s = state.sheet;
+  const color = FLAVORS[s.color ?? state.myColor]?.base ?? MEMBER_COLORS[0];
+  const current = myLook();
+  const done = () => {
+    if (s.back) openReplace(s.back);
+    else {
+      closeSheet();
+      welcomeRepaint?.();
+    }
+  };
+  const cell = (look, label, sub) => h('button', {
+    class: `look-cell${sameLook(look, current) ? ' on' : ''}`,
+    type: 'button',
+    'data-testid': `look-${look ? `${look.job}-${look.v}` : 'none'}`,
+    onClick: () => {
+      pickLook(look);
+      toast(`내 캐릭터: ${lookName(look)}`);
+      done();
+    },
+  }, lookSvg(look, color, 66), h('span', { class: 'look-cell-name' }, label, sub ? h('small', null, sub) : null));
+  const cells = [cell(null, '민무늬')];
+  for (const job of LOOK_JOBS) for (const v of [0, 1]) cells.push(cell({ job: job.id, v }, job.name, String(v + 1)));
+  sheetFrame(
+    h('div', { class: 'day-title' }, '내 캐릭터 고르기'),
+    h('p', { class: 'sheet-sub' }, bridge?.setLook
+      ? '공유 달력에서 내가 올린 젤리와 내 동그라미가 이 모습이 돼요. 앱 설정의 ‘내 캐릭터’와 같아요.'
+      : '공유 달력에서 내가 올린 젤리와 내 동그라미가 이 모습이 돼요. 직업마다 두 가지가 있어요.'),
+    h('div', { class: 'look-grid', 'data-testid': 'look-grid' }, ...cells),
+  );
+}
+
 function buildNameSheet() {
-  let color = state.myColor;
-  const name = h('input', { class: 'input', style: { width: '100%' }, maxlength: '20', value: state.myName, 'data-testid': 'profile-name' });
+  let color = state.sheet.color ?? state.myColor;
+  const name = h('input', { class: 'input', style: { width: '100%' }, maxlength: '20', value: state.sheet.name ?? state.myName, 'data-testid': 'profile-name' });
   const colors = h('div', { class: 'row' });
-  const paintColors = () => colors.replaceChildren(...colorSwatches(color, (i) => {
-    color = i;
-    paintColors();
-  }));
+  const lookBox = h('div');
+  const paintColors = () => {
+    colors.replaceChildren(...colorSwatches(color, (i) => {
+      color = i;
+      paintColors();
+    }));
+    lookBox.replaceChildren(lookRow(color, () => openReplace({ kind: 'look', color, back: { kind: 'name', name: name.value, color } })));
+  };
   paintColors();
   sheetFrame(
-    h('div', { class: 'day-title' }, '내 이름과 색 바꾸기'),
+    h('div', { class: 'day-title' }, '내 이름, 색, 캐릭터 바꾸기'),
     h('div', { class: 'field-label' }, '함께 쓰는 사람에게 보이는 이름'),
     name,
     h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
     colors,
+    h('div', { class: 'field-label' }, '내 캐릭터 (모든 공유 달력에서 같아요)'),
+    lookBox,
     h('button', {
       class: 'btn block',
       style: { marginTop: '14px' },
@@ -2676,7 +2840,7 @@ function buildNameSheet() {
         if (!n) return;
         rememberProfile(n, color);
         try {
-          await store.updateProfile(state.spaceId, { name: n, color });
+          await store.updateProfile(state.spaceId, { name: n, color, look: myLook() });
           closeSheet();
           toast('이름과 색을 바꿨어요');
         } catch (e) {

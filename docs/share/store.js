@@ -403,7 +403,10 @@ export function watchSpace(spaceId, onData, onError) {
   }, onData, onError);
 }
 
-/** Members in the order they joined: { uid, name, color }. */
+/**
+ * Members in the order they joined: { uid, name, color, look }. The look is the character someone
+ * picked ({ job, v }), null for a plain jelly, or undefined when their profile is from before.
+ */
 export function watchMembers(spaceId, onData, onError) {
   return watchOpened(query(collection(db, 'spaces', spaceId, 'members'), orderBy('joinedAt')), (s) => {
     const key = keys.get(spaceId)?.key;
@@ -418,6 +421,7 @@ export function watchMembers(spaceId, onData, onError) {
         uid: d.id,
         name: typeof profile.name === 'string' ? profile.name : '',
         color: Number.isInteger(profile.color) ? profile.color : null,
+        look: 'look' in profile ? profile.look : undefined,
         joinedAt: d.data().joinedAt,
       };
     }));
@@ -558,7 +562,7 @@ export async function deleteMemo(spaceId, jellyId, memoId) {
 
 // ---------------------------------------------------------------- members
 
-/** My name and colour, as the others see them. */
+/** My name, colour and character, as the others see them. */
 export async function updateProfile(spaceId, profile) {
   const me = uid();
   return updateDoc(doc(db, 'spaces', spaceId, 'members', me), {

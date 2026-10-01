@@ -4,6 +4,8 @@
 // (position-based dynamics: a ring of points per jelly held by edge springs and an area
 // constraint) and of the gestures of its JellyBoxBoard.
 
+import { drawLookBack, drawLookFront } from './character.js';
+
 /** Loud, flat colours, one per flavour, the same as in the app's box. */
 const BOX_COLORS = ['#FF3DA5', '#FF8A3D', '#FFE14D', '#8CF04F', '#63F0C4', '#43B4FF', '#3F6BF2', '#B05CFF', '#D8F55A', '#F03C5A'];
 const INK = '#1A1320';
@@ -57,6 +59,9 @@ const PIN_DAMPING = 0.95;
 const STRETCH = [1, 0.7, 0.4, 0.15];
 // Between frames of a pinned jelly's sway, once everything else is still (about 25 a second).
 const SWAY_MS = 40;
+// A jelly wearing a character shows its face from this size up (diameter, CSS pixels); smaller
+// ones only wear the hat.
+const FACE_MIN = 84;
 
 export function boxColor(flavor) {
   if (flavor === GOLDEN_FLAVOR) return GOLD;
@@ -678,9 +683,10 @@ function wrapText(ctx, text, maxWidth, maxLines) {
  * Lays out a jelly's name as large as its size allows (two lines at most), with its time and
  * length below when there is room, and who put it up for shared jellies.
  */
-function layoutLabel(ctx, item, d) {
-  const maxWidth = Math.max(1, d * 0.74);
-  const maxHeight = d * 0.62;
+/** The name and time of a jelly [d] wide; with a face ([faced]) they keep to the lower part. */
+function layoutLabel(ctx, item, d, faced = false) {
+  const maxWidth = Math.max(1, d * (faced ? 0.7 : 0.74));
+  const maxHeight = d * (faced ? 0.44 : 0.62);
   const title = item.title?.trim() || '이름 없는 젤리';
   let size = clamp(d * 0.17, 13, 30);
   let wrapped;
@@ -913,7 +919,9 @@ export class JellyBox {
     const ordered = this.items.filter((it) => !pinnedKeys.has(it.key)).sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
     const gap = 6;
     const pinD = pinned.length ? Math.min((w / pinned.length) * 0.8, h * 0.24, w * 0.42) : 0;
-    const pinBottom = pinned.length ? pad + gap + pinD + gap : 0;
+    // A hat on a pinned jelly needs room under the top of the box.
+    const hatRoom = pinned.some((it) => it.look) ? pinD * 0.3 : 0;
+    const pinBottom = pinned.length ? pad + gap + hatRoom + pinD + gap : 0;
     this.world.pinnedBottom = pinBottom;
     const total = w * (h - pinBottom);
     // A very long jelly still has to fit across the box.
@@ -933,7 +941,7 @@ export class JellyBox {
     }
     pinned.forEach((it, index) => {
       const cx = (w * (index + 0.5)) / pinned.length;
-      const cy = pad + gap + pinD / 2;
+      const cy = pad + gap + hatRoom + pinD / 2;
       const area = (Math.PI * pinD * pinD) / 4;
       const blob = this.world.blobs.get(it.key);
       if (!blob) {
@@ -1037,67 +1045,106 @@ export class JellyBox {
     if (!ctx || this.destroyed) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
-    // Pinned jellies are drawn last, on top of the ones falling in behind them.
-    const blobs = [...this.world.blobs.values()].sort((a, b) => a.fixed - b.fixed);
+    const blobs = [...this.world.blobs.values()];
     const sway = this.swaying();
-    const seconds = performance.now() / 1000;
-    for (const blob of blobs) {
-      const item = this.byKey.get(blob.key);
-      if (!item) continue;
-      const hang = sway && blob.fixed;
-      if (hang) {
-        // Swings a little from side to side around its pin, and bobs.
-        const pinX = blob.pinX();
-        const pinY = blob.pinY();
-        const phase = swayPhase(blob.key);
-        const bob = 1 + 0.02 * Math.sin(seconds * 3.3 + phase * 1.7);
-        ctx.save();
-        ctx.translate(pinX, pinY);
-        ctx.rotate(0.04 * Math.sin(seconds * 1.9 + phase));
-        ctx.scale(1 / Math.sqrt(bob), bob);
-        ctx.translate(-pinX, -pinY);
-      }
-      const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
-      const flavor = gold ? GOLDEN_FLAVOR : item.flavor;
-      tracePath(ctx, blob);
-      ctx.fillStyle = item.done ? doneColor(flavor) : boxColor(flavor);
-      ctx.fill();
-      if (gold && !item.done) {
-        const b = blobBounds(blob);
-        const sheen = ctx.createLinearGradient(b.minX, b.minY, b.maxX, b.maxY);
-        GOLD_SHEEN.forEach((c, i) => sheen.addColorStop(i / (GOLD_SHEEN.length - 1), c));
-        ctx.fillStyle = sheen;
-        ctx.fill();
-      }
-      if (item.done) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-      }
-      if (blob.key === this.world.grabKey) {
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      }
-      // Sized by the jelly's resting size, so that squashing does not lay the text out again.
-      const d = Math.round((2 * Math.sqrt(blob.targetArea / Math.PI)) / 2) * 2;
-      const key = [item.title, item.start, item.duration, item.done, item.badge?.text, d, this.fontEpoch].join('|');
-      let label = this.labels.get(blob.key);
-      if (!label || label.key !== key) {
-        label = layoutLabel(ctx, item, d);
-        label.key = key;
-        this.labels.set(blob.key, label);
-      }
-      this.drawLabel(label, item, blob.centroidX(), blob.centroidY());
-      const now = performance.now();
-      if (gold) drawSparkles(ctx, blob, 1, 4, now);
-      if (this.glitter.key === blob.key && this.glitter.level > 0) {
-        drawSparkles(ctx, blob, this.glitter.level, 2 + Math.round(this.glitter.level * 4), now);
-      }
-      if (this.burstKey === blob.key && this.bursting()) drawBurst(ctx, blob, (now - this.burstAt) / BURST_MS);
-      if (blob.fixed) drawPin(ctx, blob.pinX(), blob.pinY(), 9);
-      if (hang) ctx.restore();
+    const now = performance.now();
+    // The jellies falling in first, then the pinned ones in front of them. In each, all the bodies
+    // first and then the faces, hats and names, so that no jelly hides its neighbour's hat.
+    for (const group of [blobs.filter((b) => !b.fixed), blobs.filter((b) => b.fixed)]) {
+      for (const blob of group) this.hanging(blob, sway, now, () => this.drawBody(blob));
+      for (const blob of group) this.hanging(blob, sway, now, () => this.drawDress(blob, now));
     }
+  }
+
+  /** Paints with a pinned jelly swinging a little from side to side around its pin, and bobbing. */
+  hanging(blob, sway, now, paint) {
+    if (!sway || !blob.fixed) {
+      paint();
+      return;
+    }
+    const { ctx } = this;
+    const seconds = now / 1000;
+    const pinX = blob.pinX();
+    const pinY = blob.pinY();
+    const phase = swayPhase(blob.key);
+    const bob = 1 + 0.02 * Math.sin(seconds * 3.3 + phase * 1.7);
+    ctx.save();
+    ctx.translate(pinX, pinY);
+    ctx.rotate(0.04 * Math.sin(seconds * 1.9 + phase));
+    ctx.scale(1 / Math.sqrt(bob), bob);
+    ctx.translate(-pinX, -pinY);
+    paint();
+    ctx.restore();
+  }
+
+  /** The colour a jelly is drawn in. */
+  colorOf(item) {
+    const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
+    const flavor = gold ? GOLDEN_FLAVOR : item.flavor;
+    return item.done ? doneColor(flavor) : boxColor(flavor);
+  }
+
+  drawBody(blob) {
+    const { ctx } = this;
+    const item = this.byKey.get(blob.key);
+    if (!item) return;
+    const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
+    const color = this.colorOf(item);
+    if (item.look) drawLookBack(ctx, item.look, blob.centroidX(), blob.centroidY(), Math.sqrt(blob.targetArea / Math.PI), color);
+    tracePath(ctx, blob);
+    ctx.fillStyle = color;
+    ctx.fill();
+    if (gold && !item.done) {
+      const b = blobBounds(blob);
+      const sheen = ctx.createLinearGradient(b.minX, b.minY, b.maxX, b.maxY);
+      GOLD_SHEEN.forEach((c, i) => sheen.addColorStop(i / (GOLD_SHEEN.length - 1), c));
+      ctx.fillStyle = sheen;
+      ctx.fill();
+    }
+    if (item.done) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+    if (blob.key === this.world.grabKey) {
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+  }
+
+  /** What goes on a jelly: its character's face and hat, its name, sparkles, and the pin. */
+  drawDress(blob, now) {
+    const { ctx } = this;
+    const item = this.byKey.get(blob.key);
+    if (!item) return;
+    const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
+    const r = Math.sqrt(blob.targetArea / Math.PI);
+    // Sized by the jelly's resting size, so that squashing does not lay the text out again.
+    const d = Math.round(r) * 2;
+    const faced = item.look != null && d >= FACE_MIN;
+    const cx = blob.centroidX();
+    const cy = blob.centroidY();
+    if (item.look) {
+      const color = this.colorOf(item);
+      // The face moves with the jelly's middle, above its name; the hat sits on its top.
+      if (faced) drawLookFront(ctx, item.look, cx, cy, r, color, { faceY: -36, faceScale: 0.72, head: false, body: false });
+      drawLookFront(ctx, item.look, cx, blobBounds(blob).minY + r, r, color, { face: false, body: false, hatLift: faced ? 6 : 0 });
+    }
+    const key = [item.title, item.start, item.duration, item.done, item.badge?.text, d, faced, this.fontEpoch].join('|');
+    let label = this.labels.get(blob.key);
+    if (!label || label.key !== key) {
+      label = layoutLabel(ctx, item, d, faced);
+      label.key = key;
+      this.labels.set(blob.key, label);
+    }
+    this.drawLabel(label, item, cx, faced ? cy + r * 0.26 : cy);
+    if (gold) drawSparkles(ctx, blob, 1, 4, now);
+    if (this.glitter.key === blob.key && this.glitter.level > 0) {
+      drawSparkles(ctx, blob, this.glitter.level, 2 + Math.round(this.glitter.level * 4), now);
+    }
+    if (this.burstKey === blob.key && this.bursting()) drawBurst(ctx, blob, (now - this.burstAt) / BURST_MS);
+    if (blob.fixed) drawPin(ctx, blob.pinX(), blob.pinY(), 9);
   }
 
   drawLabel(label, item, cx, cy) {

@@ -108,6 +108,9 @@ jobs:
           npm run bundle
           git diff --exit-code -- ../../docs/share/vendor/firebase.js
 
+      - name: The characters drawn by the page and the app match their source
+        run: node looks/build-looks.mjs --check
+
       - name: Security rules
         run: npm run test:rules
 
