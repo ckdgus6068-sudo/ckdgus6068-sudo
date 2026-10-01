@@ -33,7 +33,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavor
+import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyType
 import kotlin.math.min
 import kotlin.math.sin
 
@@ -277,12 +279,15 @@ fun BoxScope.JellyLabel(
             top = if (heightDp < 22f) 0.dp else 3.dp,
         ),
     ) {
+        // Narrow week columns keep the plain face; everywhere else jellies wear the display face.
+        val type = LocalJellyType.current
         Text(
-            text = title,
+            text = keepWords(title),
             color = ink,
             fontSize = titleSize.sp,
             lineHeight = lineHeight.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontFamily = if (compact) null else type.display,
+            fontWeight = if (compact) FontWeight.SemiBold else type.displayWeight,
             maxLines = titleLines,
             overflow = TextOverflow.Ellipsis,
         )

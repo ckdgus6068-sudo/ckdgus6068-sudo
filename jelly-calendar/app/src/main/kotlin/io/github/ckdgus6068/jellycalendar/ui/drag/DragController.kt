@@ -20,7 +20,7 @@ sealed interface DropTarget {
     data object Tray : DropTarget
 }
 
-enum class DragSource { TIMELINE, TRAY }
+enum class DragSource { TIMELINE, TRAY, BOX }
 
 /** What the timeline tells the drag controller about itself. All rectangles are in root coordinates. */
 interface TimelineZone {
@@ -157,6 +157,9 @@ class DragController {
     var timeline: TimelineZone? = null
     var tray: TrayZone? = null
     val dayRects = HashMap<LocalDate, Rect>()
+
+    /** The box view of one day: dropping a jelly anywhere on it puts the jelly into that day. */
+    var board: Pair<LocalDate, Rect>? = null
     private val rectProviders = HashMap<String, () -> Rect?>()
 
     /** Called when a jelly is dropped somewhere it is allowed to go. */
@@ -221,7 +224,13 @@ class DragController {
             !accepted -> ({ s.startRect })
             target is DropTarget.Slot -> ({ timeline?.slotRect(target.date, target.startMin, s.jelly.durationMin) })
             target is DropTarget.Day -> ({
-                dayRects[target.date]?.let { Rect(center = it.center, radius = 10f) }
+                // Into the top of the box when it shows that day, otherwise onto the day's chip.
+                val box = board?.takeIf { it.first == target.date }?.second
+                if (box != null) {
+                    Rect(center = Offset(box.center.x, box.top + box.height * 0.12f), radius = 10f)
+                } else {
+                    dayRects[target.date]?.let { Rect(center = it.center, radius = 10f) }
+                }
             })
             else -> ({ tray?.landingRect(s.jelly.durationMin) })
         }
@@ -267,6 +276,9 @@ class DragController {
         val p = pointer
         tray?.let { if (it.bounds.contains(p)) return DropTarget.Tray }
         for ((date, rect) in dayRects) {
+            if (rect.contains(p)) return DropTarget.Day(date, allowed = s.jelly.isDone || !date.isBefore(today))
+        }
+        board?.let { (date, rect) ->
             if (rect.contains(p)) return DropTarget.Day(date, allowed = s.jelly.isDone || !date.isBefore(today))
         }
         val zone = timeline ?: return null

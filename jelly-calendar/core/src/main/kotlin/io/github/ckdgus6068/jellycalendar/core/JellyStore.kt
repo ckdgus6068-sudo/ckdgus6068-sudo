@@ -78,6 +78,9 @@ class JellyStore(
 
     fun move(id: String, date: LocalDate, startMin: Int) = mutate { Planner.move(it, id, date, startMin) }
 
+    /** Like [move], but [undo] can take it back. For moves the user is told about, e.g. onto another day. */
+    fun moveUndoable(id: String, date: LocalDate, startMin: Int) = mutateWithUndo { Planner.move(it, id, date, startMin) }
+
     fun sendToTray(id: String) = mutateWithUndo { Planner.move(it, id, null, null) }
 
     fun resize(id: String, durationMin: Int) = mutate { Planner.resize(it, id, durationMin) }

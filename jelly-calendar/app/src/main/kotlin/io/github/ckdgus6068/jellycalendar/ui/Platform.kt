@@ -1,6 +1,7 @@
 package io.github.ckdgus6068.jellycalendar.ui
 
 import androidx.compose.runtime.Composable
+import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 
 /** Things only the phone can do. The Android implementation lives next to MainActivity. */
 interface JellyPlatform {
@@ -23,4 +24,7 @@ interface JellyPlatform {
 
     @Composable
     fun BackHandler(enabled: Boolean, onBack: () -> Unit)
+
+    /** The typefaces bundled with the app; without them the phone's own font is used. */
+    val fonts: BundledFonts get() = BundledFonts.None
 }

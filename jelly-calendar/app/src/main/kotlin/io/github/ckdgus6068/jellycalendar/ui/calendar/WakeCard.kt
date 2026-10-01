@@ -30,6 +30,7 @@ import io.github.ckdgus6068.jellycalendar.ui.alarmSourceName
 import io.github.ckdgus6068.jellycalendar.ui.common.JellyButton
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.hmTo
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import kotlin.math.cos
 import kotlin.math.sin
@@ -131,7 +132,7 @@ fun WakeCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(subtitle, color = colors.textSub, fontSize = 12.sp, maxLines = 2)
+                Text(keepWords(subtitle), color = colors.textSub, fontSize = 12.sp, maxLines = 2)
             }
         }
         if (actions.isNotEmpty()) {

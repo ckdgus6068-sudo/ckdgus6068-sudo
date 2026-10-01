@@ -2,13 +2,18 @@ package io.github.ckdgus6068.jellycalendar.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.sp
 
 /** One jelly colour: a pastel body, a deep "filled" colour for done jellies and a readable ink. */
 @Immutable
@@ -107,8 +112,35 @@ val DarkJellyColors = JellyColors(
 
 val LocalJellyColors = staticCompositionLocalOf { LightJellyColors }
 
+/** Material's type scale in [family], without the wide letter spacing meant for Latin text. */
+private fun typographyIn(family: FontFamily): Typography {
+    val base = Typography()
+    fun TextStyle.inFamily() = copy(fontFamily = family, letterSpacing = 0.sp)
+    return Typography(
+        displayLarge = base.displayLarge.inFamily(),
+        displayMedium = base.displayMedium.inFamily(),
+        displaySmall = base.displaySmall.inFamily(),
+        headlineLarge = base.headlineLarge.inFamily(),
+        headlineMedium = base.headlineMedium.inFamily(),
+        headlineSmall = base.headlineSmall.inFamily(),
+        titleLarge = base.titleLarge.inFamily(),
+        titleMedium = base.titleMedium.inFamily(),
+        titleSmall = base.titleSmall.inFamily(),
+        bodyLarge = base.bodyLarge.inFamily(),
+        bodyMedium = base.bodyMedium.inFamily(),
+        bodySmall = base.bodySmall.inFamily(),
+        labelLarge = base.labelLarge.inFamily(),
+        labelMedium = base.labelMedium.inFamily(),
+        labelSmall = base.labelSmall.inFamily(),
+    )
+}
+
 @Composable
-fun JellyTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun JellyTheme(
+    dark: Boolean = isSystemInDarkTheme(),
+    type: JellyType = SystemJellyType,
+    content: @Composable () -> Unit,
+) {
     val colors = if (dark) DarkJellyColors else LightJellyColors
     val scheme = if (dark) {
         darkColorScheme(
@@ -137,7 +169,8 @@ fun JellyTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () ->
             error = colors.danger,
         )
     }
-    CompositionLocalProvider(LocalJellyColors provides colors) {
-        MaterialTheme(colorScheme = scheme, content = content)
+    val typography = remember(type.body) { typographyIn(type.body) }
+    CompositionLocalProvider(LocalJellyColors provides colors, LocalJellyType provides type) {
+        MaterialTheme(colorScheme = scheme, typography = typography, content = content)
     }
 }

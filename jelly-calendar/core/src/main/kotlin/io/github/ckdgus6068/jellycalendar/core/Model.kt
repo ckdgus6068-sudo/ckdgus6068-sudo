@@ -24,6 +24,10 @@ val WEEKEND: Set<Int> = setOf(6, 7)
 @Serializable
 enum class JellyStatus { PLANNED, DONE, MISSED }
 
+/** Typeface of the app: round jelly lettering, a clean sans, or whatever the phone uses. */
+@Serializable
+enum class FontChoice { ROUND, CLEAN, SYSTEM }
+
 /**
  * One block of time ("jelly").
  *
@@ -101,6 +105,10 @@ data class Settings(
     val doneByLongPress: Boolean = true,
     val weekStartsOnSunday: Boolean = false,
     val hintDismissed: Boolean = false,
+    val boxHintDismissed: Boolean = false,
+    /** The how-to screen opens by itself once, on the first launch that has it. */
+    val guideSeen: Boolean = false,
+    val font: FontChoice = FontChoice.ROUND,
 )
 
 /** A wake-up time observed from the system's next alarm, remembered per day. */

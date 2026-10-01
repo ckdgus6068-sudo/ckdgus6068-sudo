@@ -17,6 +17,26 @@ fun hmTo(minute: Int): String = hm(minute) + if (minute % 60 == 0) "로" else "�
 
 fun range(start: Int, duration: Int): String = "${hm(start)}–${hm(start + duration)}"
 
+private const val WORD_JOINER = '\u2060'
+
+private fun isHangul(c: Char): Boolean = c in '\uAC00'..'\uD7A3' || c in '\u3131'..'\u318E'
+
+/**
+ * Glues each Korean word together so that lines wrap between words, the way Korean text is
+ * read, instead of in the middle of a word. A word longer than the whole line still breaks.
+ */
+fun keepWords(text: String): String {
+    if (text.length < 2) return text
+    val out = StringBuilder(text.length + text.length / 2)
+    for (i in text.indices) {
+        val c = text[i]
+        out.append(c)
+        val next = text.getOrNull(i + 1) ?: continue
+        if (c.isLetterOrDigit() && next.isLetterOrDigit() && (isHangul(c) || isHangul(next))) out.append(WORD_JOINER)
+    }
+    return out.toString()
+}
+
 fun durationText(minutes: Int): String = when {
     minutes < 60 -> "${minutes}분"
     minutes % 60 == 0 -> "${minutes / 60}시간"

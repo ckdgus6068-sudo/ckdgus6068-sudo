@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,9 +27,15 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 
 fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier = composed {
@@ -59,6 +66,7 @@ fun JellyChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     accent: Color = LocalJellyColors.current.accent,
+    fontFamily: FontFamily? = null,
 ) {
     val colors = LocalJellyColors.current
     Box(
@@ -74,6 +82,7 @@ fun JellyChip(
             text,
             color = if (selected) colors.onAccent else colors.text,
             fontSize = 13.sp,
+            fontFamily = fontFamily,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
@@ -137,9 +146,9 @@ fun SwitchRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, color = colors.text, fontSize = 15.sp)
+            Text(keepWords(title), color = colors.text, fontSize = 15.sp)
             if (description != null) {
-                Text(description, color = colors.textSub, fontSize = 12.sp, lineHeight = 16.sp)
+                Text(keepWords(description), color = colors.textSub, fontSize = 12.sp, lineHeight = 16.sp)
             }
         }
         Switch(
@@ -157,4 +166,48 @@ fun SwitchRow(
 fun ThinDivider(modifier: Modifier = Modifier) {
     val colors = LocalJellyColors.current
     Box(modifier.fillMaxWidth().height(1.dp).background(colors.gridLine))
+}
+
+/**
+ * One line of text that shrinks from [maxSize] down to [minSize] to fit its width, so a wide
+ * typeface never cuts a date short. Only if even [minSize] is too wide does it end in "…".
+ */
+@Composable
+fun FitText(
+    text: String,
+    color: Color,
+    maxSize: TextUnit,
+    minSize: TextUnit,
+    modifier: Modifier = Modifier,
+    fontFamily: FontFamily? = null,
+    fontWeight: FontWeight? = null,
+) {
+    BoxWithConstraints(modifier) {
+        val measurer = rememberTextMeasurer()
+        val width = constraints.maxWidth
+        val size = remember(text, fontFamily, fontWeight, width, maxSize, minSize) {
+            var candidate = maxSize.value
+            while (candidate > minSize.value) {
+                val measured = measurer.measure(
+                    text = text,
+                    style = TextStyle(fontSize = candidate.sp, fontFamily = fontFamily, fontWeight = fontWeight),
+                    maxLines = 1,
+                    softWrap = false,
+                )
+                if (measured.size.width <= width) break
+                candidate -= 0.5f
+            }
+            candidate.coerceAtLeast(minSize.value)
+        }
+        Text(
+            text,
+            color = color,
+            fontSize = size.sp,
+            fontFamily = fontFamily,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

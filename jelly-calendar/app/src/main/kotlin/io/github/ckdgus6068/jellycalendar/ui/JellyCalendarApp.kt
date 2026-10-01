@@ -50,16 +50,18 @@ import io.github.ckdgus6068.jellycalendar.ui.editor.JellyForm
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalIdleWobble
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalJellyClock
 import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyClock
+import io.github.ckdgus6068.jellycalendar.ui.screens.GuideScreen
 import io.github.ckdgus6068.jellycalendar.ui.screens.RoutinesScreen
 import io.github.ckdgus6068.jellycalendar.ui.screens.SettingsScreen
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavors
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyTheme
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.jellyType
 import java.time.LocalDate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-enum class Screen { CALENDAR, ROUTINES, SETTINGS }
+enum class Screen { CALENDAR, ROUTINES, SETTINGS, GUIDE }
 
 /** The routine laid down on first launch: the morning run from the original idea. */
 fun sampleRoutine(today: LocalDate, id: String): Routine = Routine(
@@ -112,6 +114,14 @@ fun JellyCalendarApp(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // The how-to screen opens by itself once, the first time the app starts with it.
+    LaunchedEffect(Unit) {
+        if (!store.current.settings.guideSeen) {
+            screen = Screen.GUIDE
+            store.updateSettings { it.copy(guideSeen = true) }
+        }
+    }
+
     LaunchedEffect(today, weekStart) {
         // Start the sample tomorrow when this morning's run is already over.
         store.seedIfNeeded { day, id -> sampleRoutine(if (nowMinute < 6 * 60) day else day.plusDays(1), id) }
@@ -148,8 +158,13 @@ fun JellyCalendarApp(
                         defaultStart(target.date),
                         jelly.id,
                     )
-                    store.move(jelly.id, target.date, start)
-                    if (mode != ViewMode.WEEK && target.date != selected) notify("${dateTitle(target.date)}로 옮겼어요")
+                    // Moving to a day that is not on screen is announced, with a way back.
+                    if (mode != ViewMode.WEEK && target.date != selected) {
+                        store.moveUndoable(jelly.id, target.date, start)
+                        notify("‘${jelly.title}’ 젤리를 ${dateTitle(target.date)}로 옮겼어요", undo = true)
+                    } else {
+                        store.move(jelly.id, target.date, start)
+                    }
                 }
                 DropTarget.Tray -> {
                     store.sendToTray(jelly.id)
@@ -273,11 +288,6 @@ fun JellyCalendarApp(
 
         override fun toggleDone(jelly: Jelly) = store.toggleDone(jelly.id)
 
-        override fun sendToTray(jelly: Jelly) {
-            store.sendToTray(jelly.id)
-            notify("‘${jelly.title}’ 젤리를 보관함에 넣었어요", undo = true)
-        }
-
         override fun resize(jelly: Jelly, duration: Int) = store.resize(jelly.id, duration)
 
         override fun create(date: LocalDate?, start: Int?) {
@@ -316,14 +326,21 @@ fun JellyCalendarApp(
             screen = Screen.SETTINGS
         }
 
-        override fun dismissHint() = store.updateSettings { it.copy(hintDismissed = true) }
+        override fun openGuide() {
+            screen = Screen.GUIDE
+        }
+
+        override fun dismissHint(mode: ViewMode) = store.updateSettings {
+            if (mode == ViewMode.BOX) it.copy(boxHintDismissed = true) else it.copy(hintDismissed = true)
+        }
     }
 
     platform.BackHandler(enabled = editor == null && (screen != Screen.CALENDAR || mode != ViewMode.BOX)) {
         if (screen != Screen.CALENDAR) screen = Screen.CALENDAR else mode = ViewMode.BOX
     }
 
-    JellyTheme {
+    val type = remember(data.settings.font, platform.fonts) { jellyType(data.settings.font, platform.fonts) }
+    JellyTheme(type = type) {
         val colors = LocalJellyColors.current
         val clock = rememberJellyClock(data.settings.idleWobble)
         CompositionLocalProvider(
@@ -357,6 +374,8 @@ fun JellyCalendarApp(
                         trayCount = Planner.tray(data).size,
                         onBack = { screen = Screen.CALENDAR },
                         onChange = { store.updateSettings(it) },
+                        onOpenGuide = { screen = Screen.GUIDE },
+                        fonts = platform.fonts,
                         onOpenAlarms = { actions.openAlarms() },
                         onClearTray = {
                             store.clearTray()
@@ -371,6 +390,11 @@ fun JellyCalendarApp(
                                 if (decoded == null) notify("백업 파일을 읽을 수 없어요") else pendingImport = decoded
                             }
                         },
+                    )
+                    Screen.GUIDE -> GuideScreen(
+                        settings = data.settings,
+                        gapMin = data.settings.wakeGapMin,
+                        onBack = { screen = Screen.CALENDAR },
                     )
                 }
                 DragOverlay(

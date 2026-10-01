@@ -72,6 +72,58 @@ class LayoutAndCodecTest {
     }
 
     @Test
+    fun olderSettingsGetTheNewDefaults() {
+        // Saved before the font choice and the how-to screen existed.
+        val text = """{"settings":{"wakeGapMin":15,"hintDismissed":true}}"""
+        val settings = JellyCodec.decode(text).settings
+        assertEquals(15, settings.wakeGapMin)
+        assertTrue(settings.hintDismissed)
+        assertFalse(settings.boxHintDismissed)
+        assertFalse(settings.guideSeen)
+        assertEquals(FontChoice.ROUND, settings.font)
+    }
+
+    @Test
+    fun unknownFontFallsBackToDefault() {
+        val text = """{"settings":{"font":"COMIC","guideSeen":true}}"""
+        val settings = JellyCodec.decode(text).settings
+        assertEquals(FontChoice.ROUND, settings.font)
+        assertTrue(settings.guideSeen)
+    }
+
+    @Test
+    fun fontChoiceRoundTrips() {
+        val data = AppData(settings = Settings(font = FontChoice.CLEAN, guideSeen = true, boxHintDismissed = true))
+        assertEquals(data, JellyCodec.decode(JellyCodec.encode(data)))
+    }
+
+    @Test
+    fun undoableMoveCanBeTakenBack() {
+        val now = LocalDateTime.of(2026, 9, 28, 9, 0)
+        val store = JellyStore(AppData(), clock = { now }, idFactory = { "new" })
+        val jelly = store.newJelly("보고서", 6, 90, now.toLocalDate(), 14 * 60)
+        val saturday = now.toLocalDate().plusDays(5)
+        store.moveUndoable(jelly.id, saturday, 14 * 60)
+        assertEquals(saturday, store.current.jelly(jelly.id)?.date)
+        assertTrue(store.undo())
+        assertEquals(now.toLocalDate(), store.current.jelly(jelly.id)?.date)
+    }
+
+    @Test
+    fun plainMoveKeepsTheLastUndo() {
+        val now = LocalDateTime.of(2026, 9, 28, 9, 0)
+        var n = 0
+        val store = JellyStore(AppData(), clock = { now }, idFactory = { "id${n++}" })
+        val a = store.newJelly("빨래", 1, 30, now.toLocalDate(), 600)
+        val b = store.newJelly("독서", 2, 40, now.toLocalDate(), 700)
+        store.deleteJelly(a.id)
+        store.move(b.id, now.toLocalDate(), 800)
+        // The move did not replace the undo step: undo still brings the deleted jelly back.
+        assertTrue(store.undo())
+        assertEquals(2, store.current.jellies.size)
+    }
+
+    @Test
     fun storeUndoRestoresDeletedJelly() {
         val now = LocalDateTime.of(2026, 9, 28, 9, 0)
         val store = JellyStore(AppData(), clock = { now }, idFactory = { "new" })

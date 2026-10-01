@@ -14,8 +14,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import io.github.ckdgus6068.jellycalendar.ui.JellyCalendarApp
 import io.github.ckdgus6068.jellycalendar.ui.JellyPlatform
+import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.DarkJellyColors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LightJellyColors
 
@@ -79,6 +83,16 @@ class MainActivity : ComponentActivity() {
         override fun BackHandler(enabled: Boolean, onBack: () -> Unit) {
             androidx.activity.compose.BackHandler(enabled = enabled, onBack = onBack)
         }
+
+        override val fonts = BundledFonts(
+            // One heavy weight only: declared as Black so that Compose never fakes a bolder one.
+            round = FontFamily(Font(R.font.bagel_fat_one, FontWeight.Black)),
+            clean = FontFamily(
+                Font(R.font.pretendard_regular, FontWeight.Normal),
+                Font(R.font.pretendard_semibold, FontWeight.SemiBold),
+                Font(R.font.pretendard_bold, FontWeight.Bold),
+            ),
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

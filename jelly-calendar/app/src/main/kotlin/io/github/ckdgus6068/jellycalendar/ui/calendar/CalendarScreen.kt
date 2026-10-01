@@ -37,22 +37,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
-import io.github.ckdgus6068.jellycalendar.ui.box.JellyBoxBoard
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
+import io.github.ckdgus6068.jellycalendar.ui.box.JellyBoxBoard
+import io.github.ckdgus6068.jellycalendar.ui.common.FitText
 import io.github.ckdgus6068.jellycalendar.ui.common.clickableNoRipple
 import io.github.ckdgus6068.jellycalendar.ui.common.squishyClick
 import io.github.ckdgus6068.jellycalendar.ui.dateTitle
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyBody
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyType
 import io.github.ckdgus6068.jellycalendar.ui.weekTitle
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -67,7 +69,6 @@ interface CalendarActions {
     fun goToday()
     fun open(jelly: Jelly)
     fun toggleDone(jelly: Jelly)
-    fun sendToTray(jelly: Jelly)
     fun resize(jelly: Jelly, duration: Int)
     fun create(date: LocalDate?, start: Int?)
     fun setAlarm(date: LocalDate, minute: Int, label: String)
@@ -75,7 +76,8 @@ interface CalendarActions {
     fun openAlarms()
     fun openRoutines()
     fun openSettings()
-    fun dismissHint()
+    fun openGuide()
+    fun dismissHint(mode: ViewMode)
 }
 
 @Composable
@@ -143,21 +145,27 @@ fun CalendarScreen(
                 )
             }
         }
-        if (!data.settings.hintDismissed) {
-            HintBanner(onDismiss = { actions.dismissHint() })
+        val hintHidden = if (mode == ViewMode.BOX) data.settings.boxHintDismissed else data.settings.hintDismissed
+        if (!hintHidden) {
+            HintBanner(
+                text = hintText(mode, data.settings.doneByDoubleTap, data.settings.doneByLongPress),
+                onGuide = { actions.openGuide() },
+                onDismiss = { actions.dismissHint(mode) },
+            )
         }
         Box(Modifier.weight(1f).padding(top = 6.dp)) {
             val scroll = if (compact) weekScroll else dayScroll
             val days = if (compact) weekDays else listOf(selected)
             if (mode == ViewMode.BOX) {
                 JellyBoxBoard(
+                    date = selected,
                     jellies = Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED },
                     drag = drag,
                     doneByDoubleTap = data.settings.doneByDoubleTap,
                     doneByLongPress = data.settings.doneByLongPress,
                     onOpen = { actions.open(it) },
                     onToggleDone = { actions.toggleDone(it) },
-                    onSendToTray = { actions.sendToTray(it) },
+                    onSwipe = { actions.shift(it) },
                     modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
                 )
             } else {
@@ -180,7 +188,12 @@ fun CalendarScreen(
             }
             JellyFab(
                 onClick = { actions.create(if (compact && today in weekDays) today else selected, null) },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp),
+                // In the box the jellies pile up at the bottom, so the button waits in the empty top corner.
+                modifier = if (mode == ViewMode.BOX) {
+                    Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 22.dp)
+                } else {
+                    Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp)
+                },
             )
         }
         JellyTray(
@@ -223,6 +236,7 @@ private fun InitialScroll(
 @Composable
 private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: CalendarActions) {
     val colors = LocalJellyColors.current
+    val type = LocalJellyType.current
     var menu by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 2.dp),
@@ -237,13 +251,13 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
                 .weight(1f)
                 .clickableNoRipple { actions.goToday() },
         ) {
-            Text(
+            FitText(
                 title,
                 color = colors.text,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                maxSize = 17.sp,
+                minSize = 12.sp,
+                fontFamily = type.display,
+                fontWeight = type.displayWeight,
             )
             Text(subtitle ?: "눌러서 오늘로", color = if (subtitle != null) colors.accent else colors.textSub, fontSize = 11.sp)
         }
@@ -273,12 +287,16 @@ private fun TopBar(title: String, subtitle: String?, mode: ViewMode, actions: Ca
                     menu = false
                     actions.openSettings()
                 })
+                DropdownMenuItem(text = { Text("사용법") }, onClick = {
+                    menu = false
+                    actions.openGuide()
+                })
             }
         }
     }
 }
 
-/** "주 | 일" switch with a jelly that slides between the two. */
+/** "상자 | 주 | 일" switch with a jelly that slides between the three. */
 @Composable
 private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     val colors = LocalJellyColors.current
@@ -341,14 +359,37 @@ private fun JellyFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             "+",
             color = flavor.ink,
             fontSize = 30.sp,
-            fontWeight = FontWeight.Bold,
+            fontFamily = LocalJellyType.current.display,
+            fontWeight = LocalJellyType.current.displayWeight,
             modifier = Modifier.align(Alignment.Center),
         )
     }
 }
 
+/** One line of the gestures that work in [mode], following the finishing gestures chosen in settings. */
+internal fun hintText(mode: ViewMode, doubleTapDone: Boolean, longPressDone: Boolean): String {
+    val done = listOfNotNull(
+        if (doubleTapDone) "두 번 톡" else null,
+        if (longPressDone) "꾹 눌렀다 떼기" else null,
+    ).joinToString(" 또는 ")
+    val parts = ArrayList<String>()
+    parts += "톡: 열기"
+    if (done.isNotEmpty()) parts += "$done: 완료"
+    if (mode == ViewMode.BOX) {
+        parts += "끌기: 흔들기"
+        parts += "위 날짜나 아래 보관함에 놓기: 옮기기"
+        parts += "빈 곳을 옆으로 밀기: 다른 날"
+    } else {
+        parts += "꾹 눌러 끌기: 옮기기"
+        parts += "아래 손잡이: 길이"
+        parts += "빈 곳 꾹: 새 젤리"
+        parts += if (mode == ViewMode.WEEK) "옆으로 밀기: 다른 주" else "옆으로 밀기: 다른 날"
+    }
+    return parts.joinToString(" · ")
+}
+
 @Composable
-private fun HintBanner(onDismiss: () -> Unit) {
+private fun HintBanner(text: String, onGuide: () -> Unit, onDismiss: () -> Unit) {
     val colors = LocalJellyColors.current
     Row(
         Modifier
@@ -360,13 +401,22 @@ private fun HintBanner(onDismiss: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "두 번 톡: 완료 · 꾹 눌러 끌기: 옮기기 · 아래 손잡이: 길이 · 빈 곳 꾹: 새 젤리 · 옆으로 밀기: 다음 주",
+            keepWords(text),
             color = colors.text,
             fontSize = 12.sp,
             lineHeight = 17.sp,
             modifier = Modifier.weight(1f),
         )
-        Spacer(Modifier.width(4.dp))
+        Spacer(Modifier.width(6.dp))
+        Box(
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(colors.accent)
+                .clickableNoRipple(onGuide)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        ) {
+            Text("사용법", color = colors.onAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
         Box(
             Modifier
                 .size(32.dp)

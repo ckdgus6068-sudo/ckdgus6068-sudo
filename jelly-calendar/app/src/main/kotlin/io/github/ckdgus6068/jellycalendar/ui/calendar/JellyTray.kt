@@ -53,6 +53,7 @@ import io.github.ckdgus6068.jellycalendar.ui.durationText
 import io.github.ckdgus6068.jellycalendar.ui.missedText
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyType
 import java.time.LocalDate
 
 private val PILL_HEIGHT = 50.dp
@@ -125,7 +126,13 @@ fun JellyTray(
             .padding(top = 8.dp, bottom = 10.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("보관함", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "보관함",
+                color = colors.text,
+                fontSize = 15.sp,
+                fontFamily = LocalJellyType.current.display,
+                fontWeight = LocalJellyType.current.displayWeight,
+            )
             if (items.isNotEmpty()) {
                 Box(
                     Modifier
@@ -229,7 +236,8 @@ private fun TrayJelly(
                 color = flavor.ink,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontFamily = LocalJellyType.current.display,
+                fontWeight = LocalJellyType.current.displayWeight,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

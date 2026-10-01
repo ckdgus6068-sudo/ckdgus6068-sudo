@@ -60,6 +60,7 @@ import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyBody
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyLabel
 import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyMotion
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import java.time.LocalDate
@@ -205,7 +206,7 @@ fun JellyForm(
                     .padding(14.dp),
             ) {
                 Text(
-                    "‘${daysText(linked.days)} ${hm(linked.startMin)} · ${durationText(linked.durationMin)}’ 반복 젤리의 하루치예요.",
+                    keepWords("‘${daysText(linked.days)} ${hm(linked.startMin)} · ${durationText(linked.durationMin)}’ 반복 젤리의 하루치예요."),
                     color = colors.text,
                     fontSize = 13.sp,
                 )

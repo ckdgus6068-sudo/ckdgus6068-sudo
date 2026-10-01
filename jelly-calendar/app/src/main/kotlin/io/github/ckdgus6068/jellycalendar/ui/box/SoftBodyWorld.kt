@@ -5,6 +5,7 @@ import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlinx.coroutines.channels.Channel
 
 /**
  * One soft jelly: a ring of points held together by edge springs and an area ("pressure")
@@ -153,9 +154,14 @@ class SoftBodyWorld {
     var restFrames = 0
         private set
 
+    /** The held jelly follows the finger at ([grabX], [grabY]), keeping the offset it was grabbed at. */
     var grabId: String? = null
     var grabX = 0f
     var grabY = 0f
+    var grabOffsetX = 0f
+    var grabOffsetY = 0f
+
+    private val wakeSignal = Channel<Unit>(Channel.CONFLATED)
 
     fun resize(w: Float, h: Float, padding: Float) {
         width = w; height = h; pad = padding
@@ -165,6 +171,26 @@ class SoftBodyWorld {
 
     fun wake() {
         restFrames = 0
+        wakeSignal.trySend(Unit)
+    }
+
+    /** Suspends until something moves the jellies again, so a still box costs no frames. */
+    suspend fun awaitWake() {
+        wakeSignal.receive()
+    }
+
+    fun grab(blob: SoftBlob, x: Float, y: Float) {
+        grabId = blob.id
+        grabOffsetX = x - blob.centroidX()
+        grabOffsetY = y - blob.centroidY()
+        grabX = x
+        grabY = y
+        wake()
+    }
+
+    fun release() {
+        grabId = null
+        wake()
     }
 
     fun add(id: String, area: Float, spawnX: Float, spawnY: Float) {
@@ -184,7 +210,7 @@ class SoftBodyWorld {
                 b.solveShape()
                 if (b.id == grabId) {
                     val cx = b.centroidX(); val cy = b.centroidY()
-                    b.push((grabX - cx) * 0.18f, (grabY - cy) * 0.18f)
+                    b.push((grabX - grabOffsetX - cx) * 0.18f, (grabY - grabOffsetY - cy) * 0.18f)
                 }
             }
             for (b in blobs.values) b.updateBounds()

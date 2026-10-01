@@ -35,8 +35,10 @@ import io.github.ckdgus6068.jellycalendar.ui.daysText
 import io.github.ckdgus6068.jellycalendar.ui.durationText
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyBody
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyFlavors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyType
 
 @Composable
 fun ScreenHeader(title: String, onBack: () -> Unit) {
@@ -49,7 +51,13 @@ fun ScreenHeader(title: String, onBack: () -> Unit) {
             @Suppress("DEPRECATION")
             Icon(Icons.Filled.ArrowBack, contentDescription = "뒤로", tint = colors.text)
         }
-        Text(title, color = colors.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(
+            title,
+            color = colors.text,
+            fontSize = 20.sp,
+            fontFamily = LocalJellyType.current.display,
+            fontWeight = LocalJellyType.current.displayWeight,
+        )
     }
 }
 
@@ -73,7 +81,7 @@ fun RoutinesScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                "여기 있는 젤리는 정한 요일마다 자동으로 깔려요. 시간과 길이를 바꾸면 오늘부터 손대지 않은 날에 반영돼요.",
+                keepWords("여기 있는 젤리는 정한 요일마다 자동으로 깔려요. 시간과 길이를 바꾸면 오늘부터 손대지 않은 날에 반영돼요."),
                 color = colors.textSub,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,

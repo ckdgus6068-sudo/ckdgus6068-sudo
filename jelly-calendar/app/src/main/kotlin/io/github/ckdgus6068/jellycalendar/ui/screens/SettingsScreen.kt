@@ -17,9 +17,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.core.NextAlarm
 import io.github.ckdgus6068.jellycalendar.core.Settings
 import io.github.ckdgus6068.jellycalendar.ui.alarmSourceName
@@ -29,8 +31,11 @@ import io.github.ckdgus6068.jellycalendar.ui.common.SectionTitle
 import io.github.ckdgus6068.jellycalendar.ui.common.SwitchRow
 import io.github.ckdgus6068.jellycalendar.ui.common.ThinDivider
 import io.github.ckdgus6068.jellycalendar.ui.hm
+import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.shortDate
+import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.jellyType
 
 @Composable
 fun SettingsScreen(
@@ -39,6 +44,8 @@ fun SettingsScreen(
     trayCount: Int,
     onBack: () -> Unit,
     onChange: ((Settings) -> Settings) -> Unit,
+    onOpenGuide: () -> Unit,
+    fonts: BundledFonts,
     onOpenAlarms: () -> Unit,
     onClearTray: () -> Unit,
     onExport: () -> Unit,
@@ -71,7 +78,7 @@ fun SettingsScreen(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "휴대폰이 알려 주는 ‘다음 알람’ 하나만 읽을 수 있어요. 기상 시간대 밖의 알람은 무시해요.",
+                    keepWords("휴대폰이 알려 주는 ‘다음 알람’ 하나만 읽을 수 있어요. 기상 시간대 밖의 알람은 무시해요."),
                     color = colors.textSub,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -119,7 +126,10 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "알람을 지우거나 시각을 고치는 공개 기능은 없어서, 새 알람을 추가하고 예전 알람을 끄는 방식으로 옮겨요. 기기가 끄기 요청을 지원하지 않으면 시계 앱에서 직접 꺼 주세요.",
+                keepWords(
+                    "알람을 지우거나 시각을 고치는 공개 기능은 없어서, 새 알람을 추가하고 예전 알람을 끄는 방식으로 옮겨요. " +
+                        "기기가 끄기 요청을 지원하지 않으면 시계 앱에서 직접 꺼 주세요.",
+                ),
                 color = colors.textSub,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
@@ -156,6 +166,31 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(8.dp))
             ThinDivider()
+            SectionTitle("화면")
+            Text("글씨체", color = colors.text, fontSize = 15.sp)
+            ChipRow(
+                options = listOf(FontChoice.ROUND, FontChoice.CLEAN, FontChoice.SYSTEM),
+                selected = settings.font,
+                label = { fontName(it) },
+                family = { jellyType(it, fonts).display },
+            ) { v -> onChange { it.copy(font = v) } }
+            Text(
+                keepWords("말랑은 젤리와 제목을 둥글고 굵은 글씨로, 나머지를 깔끔한 글씨로 써요. 휴대폰 글꼴은 휴대폰 설정의 글꼴을 따라요."),
+                color = colors.textSub,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            JellyButton(
+                "사용법 보기",
+                onClick = onOpenGuide,
+                filled = false,
+                color = colors.text,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(Modifier.height(8.dp))
+            ThinDivider()
             SectionTitle("데이터")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 JellyButton("백업 파일 저장", onClick = onExport, filled = false, color = colors.text, modifier = Modifier.weight(1f))
@@ -175,8 +210,20 @@ fun SettingsScreen(
     }
 }
 
+private fun fontName(choice: FontChoice): String = when (choice) {
+    FontChoice.ROUND -> "말랑"
+    FontChoice.CLEAN -> "깔끔"
+    FontChoice.SYSTEM -> "휴대폰 글꼴"
+}
+
 @Composable
-private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
+private fun <T> ChipRow(
+    options: List<T>,
+    selected: T,
+    label: (T) -> String,
+    family: ((T) -> FontFamily)? = null,
+    onPick: (T) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -185,7 +232,12 @@ private fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, onP
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         for (option in options) {
-            JellyChip(label(option), selected = option == selected, onClick = { onPick(option) })
+            JellyChip(
+                label(option),
+                selected = option == selected,
+                onClick = { onPick(option) },
+                fontFamily = family?.invoke(option),
+            )
         }
     }
 }
