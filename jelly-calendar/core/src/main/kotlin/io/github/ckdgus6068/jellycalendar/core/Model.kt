@@ -69,6 +69,12 @@ data class Jelly(
     val isInTray: Boolean get() = !isScheduled
     val isDone: Boolean get() = status == JellyStatus.DONE
     val endMin: Int? get() = startMin?.let { it + durationMin }
+
+    /** True when the jelly runs past midnight into the next day (a night shift, a 24-hour duty). */
+    val overnight: Boolean get() = startMin?.let { it + durationMin > MINUTES_PER_DAY } ?: false
+
+    /** The day the jelly ends on: its own day, or the next one when it runs past midnight. */
+    val endDate: LocalDate? get() = date?.let { if (overnight) it.plusDays(1) else it }
 }
 
 /** A jelly that is laid down again and again on chosen days of the week. */

@@ -15,7 +15,14 @@ fun hm(minute: Int): String {
 /** "06:00로" or "06:50으로": the particle follows how the time is read aloud (시 or 분). */
 fun hmTo(minute: Int): String = hm(minute) + if (minute % 60 == 0) "로" else "으로"
 
-fun range(start: Int, duration: Int): String = "${hm(start)}–${hm(start + duration)}"
+/** When a jelly ends: "10:30", or "다음 날 09:00" when it runs past midnight. */
+fun endText(start: Int, duration: Int): String {
+    val end = start + duration
+    return if (end > 24 * 60) "다음 날 ${hm(end - 24 * 60)}" else hm(end)
+}
+
+/** "09:00–10:30", or "18:00–다음 날 09:00" for a night shift. */
+fun range(start: Int, duration: Int): String = "${hm(start)}–${endText(start, duration)}"
 
 private const val WORD_JOINER = '\u2060'
 

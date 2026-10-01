@@ -68,9 +68,11 @@ import io.github.ckdgus6068.jellycalendar.ui.drag.DragSource
 import io.github.ckdgus6068.jellycalendar.ui.drag.DraggableJelly
 import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
 import io.github.ckdgus6068.jellycalendar.ui.drag.TimelineZone
+import io.github.ckdgus6068.jellycalendar.ui.common.squishyClick
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyBody
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyLabel
+import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyMotion
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyLook
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyMotion
 import io.github.ckdgus6068.jellycalendar.ui.range
@@ -131,12 +133,14 @@ private class GridZone : TimelineZone {
         if (index < 0) return null
         val left = contentOrigin.x + g.colLeft(index) + g.jellyPad
         val top = contentOrigin.y + g.yOf(startMin)
-        return Rect(left, top, left + g.colWidth - 2 * g.jellyPad, top + g.jellyHeight(durationMin))
+        val shown = durationMin.coerceAtMost(MINUTES_PER_DAY - startMin)
+        return Rect(left, top, left + g.colWidth - 2 * g.jellyPad, top + g.jellyHeight(shown))
     }
 
     override fun jellySize(durationMin: Int): Size {
         val g = geometry ?: return Size(120f, 120f)
-        return Size(g.colWidth - 2 * g.jellyPad, g.jellyHeight(durationMin))
+        // A night shift being carried is shown at half a day's height at most.
+        return Size(g.colWidth - 2 * g.jellyPad, g.jellyHeight(durationMin.coerceAtMost(MINUTES_PER_DAY / 2)))
     }
 }
 
@@ -288,10 +292,29 @@ fun TimelineGrid(
                 val minVisual = ceil(geometry.minJelly / geometry.pxPerMin).toInt()
                 days.forEachIndexed { index, date ->
                     val onDay = Planner.scheduledOn(data, date)
+                    // Last night's jellies that run on into this morning, drawn from midnight.
+                    val carried = Planner.scheduledOn(data, date.minusDays(1)).filter { it.overnight }
                     val lanes = DayLayout.place(
-                        onDay.map { DayLayout.Item(it.id, it.startMin ?: 0, (it.startMin ?: 0) + it.durationMin) },
+                        onDay.map {
+                            val start = it.startMin ?: 0
+                            DayLayout.Item(it.id, start, (start + it.durationMin).coerceAtMost(MINUTES_PER_DAY))
+                        } + carried.map { DayLayout.Item(carriedKey(it), 0, it.endMin!! - MINUTES_PER_DAY) },
                         minVisualMinutes = minVisual,
                     )
+                    for (jelly in carried) {
+                        val lane = lanes[carriedKey(jelly)]
+                        val laneWidth = geometry.colWidth / (lane?.lanes ?: 1)
+                        key(carriedKey(jelly)) {
+                            CarriedJelly(
+                                jelly = jelly,
+                                x = geometry.colLeft(index) + laneWidth * (lane?.lane ?: 0) + geometry.jellyPad,
+                                widthPx = (laneWidth - 2 * geometry.jellyPad).coerceAtLeast(1f),
+                                geometry = geometry,
+                                compact = compact,
+                                onOpen = onOpen,
+                            )
+                        }
+                    }
                     for (jelly in onDay) {
                         val start = jelly.startMin ?: continue
                         val lane = lanes[jelly.id]
@@ -391,6 +414,49 @@ private fun HourLabels(geometry: GridGeometry, compact: Boolean) {
     }
 }
 
+private fun carriedKey(jelly: Jelly) = "${jelly.id}~next"
+
+/**
+ * The morning part of a jelly that started the evening before (a night shift), from midnight to its
+ * end. A tap opens the jelly; it is moved and stretched on its own day.
+ */
+@Composable
+private fun CarriedJelly(
+    jelly: Jelly,
+    x: Float,
+    widthPx: Float,
+    geometry: GridGeometry,
+    compact: Boolean,
+    onOpen: (Jelly) -> Unit,
+) {
+    val density = LocalDensity.current
+    val end = jelly.endMin!! - MINUTES_PER_DAY
+    val h = geometry.jellyHeight(end)
+    val heightDp = with(density) { h.toDp() }
+    val flavor = JellyFlavors[jelly.flavor]
+    val motion = rememberJellyMotion("carried-${jelly.id}", jelly.isDone)
+    JellyBody(
+        flavor = flavor,
+        modifier = Modifier
+            .offset { IntOffset(x.roundToInt(), geometry.yOf(0).roundToInt()) }
+            .size(with(density) { widthPx.toDp() }, heightDp)
+            .squishyClick { onOpen(jelly) },
+        motion = motion,
+        cornerRadius = if (compact) 9.dp else 12.dp,
+        idle = false,
+    ) {
+        JellyLabel(
+            title = "↳ ${jelly.title}",
+            subtitle = if (compact) "~${hm(end)}" else "어제부터 · ${hm(end)}까지",
+            flavor = flavor,
+            motion = motion,
+            heightDp = heightDp.value,
+            compact = compact,
+            missed = jelly.status == JellyStatus.MISSED,
+        )
+    }
+}
+
 @Composable
 private fun GhostJelly(jelly: Jelly, geometry: GridGeometry, index: Int, start: Int, compact: Boolean) {
     val density = LocalDensity.current
@@ -483,7 +549,7 @@ private fun DropPreview(drag: DragController, geometry: GridGeometry, compact: B
     val x = geometry.colLeft(index) + geometry.jellyPad
     val y = geometry.yOf(hover.startMin)
     val w = geometry.colWidth - 2 * geometry.jellyPad
-    val h = geometry.jellyHeight(session.jelly.durationMin)
+    val h = geometry.jellyHeight(session.jelly.durationMin.coerceAtMost(MINUTES_PER_DAY - hover.startMin))
     val stroke = if (hover.allowed) flavor.deep else colors.danger
     Box(
         Modifier
@@ -542,10 +608,11 @@ private fun TimelineJelly(
     var preview by remember { mutableStateOf<Int?>(null) }
     var tension by remember { mutableStateOf(0f) }
     val shown = preview ?: jelly.durationMin
-    val heightPx = geometry.jellyHeight(shown)
+    val start = jelly.startMin ?: 0
+    // A jelly that runs past midnight ends at the bottom of its day; the rest is drawn on the next.
+    val heightPx = geometry.jellyHeight(shown.coerceAtMost(MINUTES_PER_DAY - start))
     val heightDp = with(density) { heightPx.toDp() }
     val widthDp = with(density) { widthPx.toDp() }
-    val start = jelly.startMin ?: 0
 
     DraggableJelly(
         jelly = jelly,
@@ -570,7 +637,8 @@ private fun TimelineJelly(
             compact = compact,
             missed = jelly.status == JellyStatus.MISSED,
         )
-        val canResize = jelly.status != JellyStatus.MISSED && heightDp.value >= (if (compact) 40f else 30f)
+        // A night shift's length is changed in its sheet: its end is not on this day.
+        val canResize = jelly.status != JellyStatus.MISSED && !jelly.overnight && heightDp.value >= (if (compact) 40f else 30f)
         if (canResize) {
             ResizeHandle(
                 motion = motion,

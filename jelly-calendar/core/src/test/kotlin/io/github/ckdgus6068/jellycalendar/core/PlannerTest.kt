@@ -249,10 +249,27 @@ class PlannerTest {
     }
 
     @Test
-    fun resizeIsClampedToTheDay() {
+    fun resizeRunsPastMidnightUpToAWholeDay() {
         val data = AppData(jellies = listOf(Jelly(id = "a", title = "a", date = monday, startMin = 23 * 60)))
-        assertEquals(60, Planner.resize(data, "a", 200).jellies.single().durationMin)
+        val longer = Planner.resize(data, "a", 200).jellies.single()
+        assertEquals(200, longer.durationMin)
+        assertTrue(longer.overnight)
+        assertEquals(monday.plusDays(1), longer.endDate)
+        assertEquals(Planner.MAX_DURATION, Planner.resize(data, "a", 3000).jellies.single().durationMin)
         assertEquals(Planner.MIN_DURATION, Planner.resize(data, "a", 1).jellies.single().durationMin)
+    }
+
+    @Test
+    fun aNightShiftRollsOverOnlyAfterItsLastDay() {
+        val night = Jelly(id = "n", title = "야간 근무", date = monday, startMin = 18 * 60, durationMin = 15 * 60)
+        val data = AppData(jellies = listOf(night))
+        // The morning after, it is still going (until 09:00): it stays where it is.
+        assertEquals(night, Planner.rollover(data, monday.plusDays(1)).jellies.single())
+        // A day later it is over, and unfinished it goes to the tray.
+        assertTrue(Planner.rollover(data, monday.plusDays(2)).jellies.single().isInTray)
+        // A jelly that ends at midnight sharp is a same-day jelly.
+        val evening = Jelly(id = "e", title = "e", date = monday, startMin = 22 * 60, durationMin = 120)
+        assertEquals(monday, evening.endDate)
     }
 
     @Test

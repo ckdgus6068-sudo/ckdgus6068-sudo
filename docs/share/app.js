@@ -31,9 +31,10 @@ const FONTS = [
 ];
 // Lengths: 10-minute steps up to two hours, then 30-minute steps up to twelve (as in the app).
 const SHORT_MAX = 120;
-const MAX_DURATION = 720;
+// Up to a whole day (a 24-hour duty); a jelly may run past midnight into the next day.
+const MAX_DURATION = 1440;
 const MAX_PINNED = 3;
-const LENGTH_TICKS = [[30, '30분'], [60, '1시간'], [120, '2시간'], [360, '6시간'], [720, '12시간']];
+const LENGTH_TICKS = [[30, '30분'], [60, '1시간'], [120, '2시간'], [360, '6시간'], [720, '12시간'], [1440, '24시간']];
 
 // The hidden golden jelly, as in the app (GoldenJelly.kt): grab one jelly in the box and let it go
 // 50 times without a break. Who finders are sent to is written here and in the app (GoldenDialog.kt).
@@ -192,7 +193,8 @@ function durationText(min) {
 
 function timeText(j) {
   if (j.start == null) return durationText(j.duration);
-  return `${hm(j.start)}–${hm(Math.min(j.start + j.duration, 1440))} · ${durationText(j.duration)}`;
+  const end = j.start + j.duration;
+  return `${hm(j.start)}–${end > 1440 ? `다음 날 ${hm(end - 1440)}` : hm(end)} · ${durationText(j.duration)}`;
 }
 
 function agoText(ts) {

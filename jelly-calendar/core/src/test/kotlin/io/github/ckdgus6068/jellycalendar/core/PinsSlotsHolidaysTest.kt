@@ -108,6 +108,27 @@ class PinsSlotsHolidaysTest {
         // A missed jelly does not hold its time, and a jelly does not get in its own way.
         assertTrue(Planner.isFree(data, day, 14 * 60, 30))
         assertTrue(Planner.isFree(data, day, 10 * 60, 60, excludeId = "a"))
+        // Past midnight is fine, as long as the next morning is clear.
+        assertTrue(Planner.isFree(data, day, 23 * 60 + 30, 60))
+    }
+
+    @Test
+    fun isFreeLooksPastMidnightBothWays() {
+        val day = LocalDate.of(2026, 10, 3)
+        val data = AppData(
+            jellies = listOf(
+                // Last night's shift runs into this morning until 08:00.
+                Jelly(id = "night", title = "야간", durationMin = 10 * 60, date = day.minusDays(1), startMin = 22 * 60),
+                // Something early the next morning.
+                Jelly(id = "early", title = "새벽", durationMin = 30, date = day.plusDays(1), startMin = 0),
+            ),
+        )
+        assertFalse(Planner.isFree(data, day, 7 * 60, 60))
+        assertTrue(Planner.isFree(data, day, 8 * 60, 30))
         assertFalse(Planner.isFree(data, day, 23 * 60 + 30, 60))
+        assertTrue(Planner.isFree(data, day, 23 * 60, 60))
+        // A 24-hour duty from 09:00 runs into the next morning's jelly.
+        assertFalse(Planner.isFree(data, day, 9 * 60, 24 * 60))
+        assertEquals(listOf(9 * 60), Planner.freeSlots(AppData(), day, 24 * 60, from = 9 * 60, count = 1))
     }
 }

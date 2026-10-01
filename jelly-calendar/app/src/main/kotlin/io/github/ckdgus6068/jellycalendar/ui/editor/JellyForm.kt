@@ -74,6 +74,7 @@ import io.github.ckdgus6068.jellycalendar.ui.dateTitle
 import io.github.ckdgus6068.jellycalendar.ui.dayName
 import io.github.ckdgus6068.jellycalendar.ui.daysText
 import io.github.ckdgus6068.jellycalendar.ui.durationText
+import io.github.ckdgus6068.jellycalendar.ui.endText
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyBody
 import io.github.ckdgus6068.jellycalendar.ui.jelly.JellyLabel
@@ -552,7 +553,7 @@ private fun FlavorPicker(selected: Int, onPick: (Int) -> Unit) {
 
 private const val SHORT_MAX = 120
 
-private val TICKS = listOf(30 to "30분", 60 to "1시간", 120 to "2시간", 360 to "6시간", 720 to "12시간")
+private val TICKS = listOf(30 to "30분", 60 to "1시간", 120 to "2시간", 360 to "6시간", 720 to "12시간", 1440 to "24시간")
 
 /** Where a length sits on the stretch bar: the first half for up to two hours, the rest up to twelve. */
 internal fun lengthToFraction(minutes: Int): Float {
@@ -836,7 +837,7 @@ private fun TimeChips(state: EditorState, onPick: () -> Unit) {
             )
         }
         JellyChip("+10분", selected = false, onClick = { state.setStartByHand(start + 10) })
-        Text("→ ${hm((start + state.duration).coerceAtMost(24 * 60))}", color = colors.textSub, fontSize = 13.sp)
+        Text("→ ${endText(start, state.duration)}", color = colors.textSub, fontSize = 13.sp)
     }
 }
 

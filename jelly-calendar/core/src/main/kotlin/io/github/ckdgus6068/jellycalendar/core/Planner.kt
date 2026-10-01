@@ -13,8 +13,8 @@ object Planner {
 
     const val MIN_DURATION = 5
 
-    /** Longest jelly the editor offers: 12 hours. */
-    const val MAX_DURATION = 12 * 60
+    /** Longest jelly: a whole day (a 24-hour duty). A jelly may run past midnight into the next day. */
+    const val MAX_DURATION = 24 * 60
 
     /** Pinned jellies a day can hold at the top of its box. */
     const val MAX_PINNED = 3
@@ -44,13 +44,16 @@ object Planner {
         return if (rest * 2 >= step) minute - rest + step else minute - rest
     }
 
-    fun clampStart(start: Int, duration: Int): Int =
-        start.coerceIn(0, (MINUTES_PER_DAY - duration).coerceAtLeast(0))
+    /**
+     * A start within the day. A jelly that starts late runs on past midnight (a night shift), so the
+     * length no longer pulls the start back; [duration] is kept for the callers' sake.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun clampStart(start: Int, duration: Int): Int = start.coerceIn(0, MINUTES_PER_DAY - 1)
 
-    fun clampDuration(duration: Int, start: Int?): Int {
-        val max = if (start != null) MINUTES_PER_DAY - start else MINUTES_PER_DAY
-        return duration.coerceIn(MIN_DURATION, max.coerceAtLeast(MIN_DURATION))
-    }
+    /** A length from [MIN_DURATION] to a whole day, whatever the start. */
+    @Suppress("UNUSED_PARAMETER")
+    fun clampDuration(duration: Int, start: Int?): Int = duration.coerceIn(MIN_DURATION, MAX_DURATION)
 
     // ---------------------------------------------------------------- queries
 
@@ -80,14 +83,26 @@ object Planner {
     fun canPin(data: AppData, date: LocalDate, jellyId: String? = null): Boolean =
         pinnedOn(data, date).count { it.id != jellyId } < MAX_PINNED
 
-    /** Whether [duration] minutes from [start] on [date] are clear of the other jellies of that day. */
+    /**
+     * The other jellies near [date] as minutes counted from the start of [date]: the day before (a
+     * night shift reaching into this morning), the day itself, and the next day (where a jelly from
+     * tonight runs on to).
+     */
+    private fun busyAround(data: AppData, date: LocalDate, excludeId: String?): List<IntRange> =
+        data.jellies.mapNotNull { j ->
+            val d = j.date ?: return@mapNotNull null
+            val s = j.startMin ?: return@mapNotNull null
+            if (j.id == excludeId || j.status == JellyStatus.MISSED) return@mapNotNull null
+            val offset = java.time.temporal.ChronoUnit.DAYS.between(date, d)
+            if (offset < -1 || offset > 1) return@mapNotNull null
+            val from = s + offset.toInt() * MINUTES_PER_DAY
+            from until from + j.durationMin
+        }
+
+    /** Whether [duration] minutes from [start] on [date] are clear of the other jellies, past midnight too. */
     fun isFree(data: AppData, date: LocalDate, start: Int, duration: Int, excludeId: String? = null): Boolean =
-        start >= 0 && start + duration <= MINUTES_PER_DAY &&
-            scheduledOn(data, date).none { j ->
-                val s = j.startMin
-                j.id != excludeId && j.status != JellyStatus.MISSED && s != null &&
-                    s < start + duration && start < s + j.durationMin
-            }
+        start in 0 until MINUTES_PER_DAY &&
+            busyAround(data, date, excludeId).none { it.first < start + duration && start < it.last + 1 }
 
     /**
      * Start times that suit a jelly of [duration] minutes on [date]: the first free gap at or after
@@ -103,14 +118,14 @@ object Planner {
         count: Int = 3,
         until: Int = 22 * 60,
     ): List<Int> {
-        val busy = scheduledOn(data, date)
-            .filter { it.id != excludeId && it.status != JellyStatus.MISSED }
-            .mapNotNull { j -> j.startMin?.let { it until it + j.durationMin } }
-        fun fits(start: Int) = start + duration <= MINUTES_PER_DAY &&
-            busy.none { it.first < start + duration && start < it.last + 1 }
+        val busy = busyAround(data, date, excludeId)
+        fun fits(start: Int) = busy.none { it.first < start + duration && start < it.last + 1 }
         val slots = ArrayList<Int>()
         var candidate = snap(from.coerceIn(0, MINUTES_PER_DAY - 1), 30).let { if (it < from) it + 30 else it }
-        while (slots.size < count && candidate <= until && candidate + duration <= MINUTES_PER_DAY) {
+        // A jelly of up to half a day is offered times that end the same day; a longer one (a 24-hour
+        // duty) may run on past midnight.
+        fun endsInTime(start: Int) = start + duration <= MINUTES_PER_DAY || duration > MINUTES_PER_DAY / 2
+        while (slots.size < count && candidate <= until && endsInTime(candidate)) {
             if (fits(candidate)) {
                 slots += candidate
                 candidate += maxOf(120, duration)
@@ -138,7 +153,7 @@ object Planner {
             if (candidate + duration <= start) return candidate
             candidate = end
         }
-        return if (candidate + duration <= MINUTES_PER_DAY) candidate else clampStart(from, duration)
+        return if (candidate < MINUTES_PER_DAY) candidate else clampStart(from, duration)
     }
 
     // ---------------------------------------------------------- routine days
@@ -214,7 +229,8 @@ object Planner {
         val jellies = data.jellies.map { j ->
             val date = j.date
             val start = j.startMin
-            if (date == null || start == null || !date.isBefore(today) || j.status != JellyStatus.PLANNED) {
+            // A jelly that runs past midnight is over only when its last day is.
+            if (date == null || start == null || !j.endDate!!.isBefore(today) || j.status != JellyStatus.PLANNED) {
                 j
             } else {
                 changed = true
@@ -255,7 +271,9 @@ object Planner {
         newId: () -> String,
     ): AppData {
         val thisWeek = weekDays(weekStart(today, data.settings.weekStartsOnSunday))
-        var result = materialize(data, visible + thisWeek, today, nowMillis, newId)
+        // The day before each visible day too: a night shift from then runs into the morning shown.
+        val dayBefore = visible.map { it.minusDays(1) }
+        var result = materialize(data, visible + dayBefore + thisWeek, today, nowMillis, newId)
         result = rollover(result, today)
         result = prune(result, today)
         return result

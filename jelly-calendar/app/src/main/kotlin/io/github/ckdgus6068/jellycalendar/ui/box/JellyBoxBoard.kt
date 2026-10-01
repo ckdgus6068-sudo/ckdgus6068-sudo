@@ -222,7 +222,8 @@ fun JellyBoxBoard(
             val hatRoom = if (look != null && !look.plain) pinDiameter * 0.3f else 0f
             val pinBottom = if (pinned.isEmpty()) 0f else pad + gap + hatRoom + pinDiameter + gap
             val totalArea = w * (h - pinBottom)
-            val wanted = ordered.associate { it.id to max(it.durationMin, 10) / 540f * 0.8f * totalArea }
+            // Past half a day a jelly does not grow any more: a 24-hour duty must still leave room.
+            val wanted = ordered.associate { it.id to it.durationMin.coerceIn(10, 720) / 540f * 0.8f * totalArea }
             val sum = wanted.values.sum()
             val scale = if (sum > 0.82f * totalArea) 0.82f * totalArea / sum else 1f
             LaunchedEffect(w, h) { world.resize(w, h, pad) }

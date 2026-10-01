@@ -272,13 +272,17 @@ try {
     if (time) await tid(page, 'time').fill(time);
     else await tid(page, 'no-time').click();
     if (title === '주말 등산') {
-      // Pulled all the way out: a whole day's hike.
+      // Pulled all the way out: a whole day, on into the next morning.
       const track = await tid(page, 'length').boundingBox();
       await page.mouse.click(track.x + track.width - 4, track.y + track.height / 2);
-      check((await tid(page, 'length').getAttribute('aria-valuenow')) === '720', 'galaxy: the length stretches to 12 hours');
+      check((await tid(page, 'length').getAttribute('aria-valuenow')) === '1440', 'galaxy: the length stretches to 24 hours');
     }
     await tid(page, 'post').click();
     await tid(page, 'memos').waitFor();
+    if (title === '주말 등산') {
+      const meta = await page.locator('.sheet .card .meta').first().textContent();
+      check(meta.includes('08:00–다음 날 08:00'), `galaxy: a jelly past midnight says when it ends (${meta.trim()})`);
+    }
     if (!time) {
       check(await page.locator('.time-box.blank .time-empty').isVisible(), 'galaxy: a jelly without a time says "시간 정하기" in its empty time field');
       await shot(page, '6a-galaxy-no-time');

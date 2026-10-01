@@ -926,7 +926,8 @@ export class JellyBox {
     const total = w * (h - pinBottom);
     // A very long jelly still has to fit across the box.
     const most = 0.7 * w * w;
-    const wanted = new Map(ordered.map((it) => [it.key, (Math.max(it.duration, 10) / 540) * 0.8 * total]));
+    // Past half a day a jelly does not grow any more: a 24-hour duty must still leave room.
+    const wanted = new Map(ordered.map((it) => [it.key, (Math.min(Math.max(it.duration, 10), 720) / 540) * 0.8 * total]));
     let sum = 0;
     for (const v of wanted.values()) sum += v;
     const scale = sum > 0.82 * total ? (0.82 * total) / sum : 1;
