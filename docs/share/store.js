@@ -86,7 +86,7 @@ export function prettyCode(code) {
 
 /** Starts Firebase and signs in anonymously. Resolves with the user id. */
 /** Connects to Firebase. Resolves with the signed-in user's id, or null when nobody is signed in. */
-export async function start(config, { emulator = false } = {}) {
+export async function start(config, { emulator = false, popups = true } = {}) {
   const app = initializeApp(config);
   let cache;
   try {
@@ -97,7 +97,7 @@ export async function start(config, { emulator = false } = {}) {
   db = initializeFirestore(app, { localCache: cache });
   auth = initializeAuth(app, {
     persistence: [indexedDBLocalPersistence, browserLocalPersistence],
-    popupRedirectResolver: browserPopupRedirectResolver,
+    ...(popups ? { popupRedirectResolver: browserPopupRedirectResolver } : {}),
   });
   if (emulator) {
     connectAuthEmulator(auth, `http://${location.hostname}:9099`, { disableWarnings: true });

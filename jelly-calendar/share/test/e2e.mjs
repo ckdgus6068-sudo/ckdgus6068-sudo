@@ -505,6 +505,61 @@ try {
   await tid(app, 'add-personal').click();
   await called(app, 'createPersonal', day);
   check(true, 'all: + makes my own jelly in the app on the day shown');
+
+  // 9. Google inside the app: the app hands over an ID token (a stand-in the emulator accepts). A
+  // vault password set on one phone opens the calendar on the next one.
+  const googlePhone = async () => {
+    const context = await browser.newContext({
+      viewport: { width: 412, height: 915 },
+      isMobile: true,
+      hasTouch: true,
+      locale: 'ko-KR',
+      reducedMotion: 'reduce',
+      timezoneId: 'Asia/Seoul',
+      userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S921N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36 JellyCalendarApp/0.2',
+    });
+    const page = await context.newPage();
+    page.on('pageerror', (e) => console.error('[google phone] page error', e));
+    page.on('dialog', (d) => d.accept());
+    await page.addInitScript(() => {
+      const token = JSON.stringify({ sub: 'google-user-1', email: 'jelly.friend@example.com', email_verified: true });
+      window.JellyBridge = {
+        hostState: () => JSON.stringify({ mode: 'shared' }),
+        googleAvailable: () => true,
+        googleSignIn: () => setTimeout(() => window.jellyHost.googleToken(token), 50),
+      };
+    });
+    await page.goto(BASE);
+    return { context, page };
+  };
+  const g1 = await googlePhone();
+  await tid(g1.page, 'google').click();
+  await tid(g1.page, 'signed-in').waitFor({ timeout: 15000 });
+  check((await tid(g1.page, 'signed-in').textContent()).includes('jelly.friend@example.com'), 'google: signs in inside the app with the app\'s token');
+  await tid(g1.page, 'name').fill('구글친구');
+  await tid(g1.page, 'create').click();
+  await tid(g1.page, 'month').waitFor();
+  await tid(g1.page, 'menu').click();
+  await tid(g1.page, 'vault-set').click();
+  await tid(g1.page, 'vault-new').fill('vault-pass-9');
+  await tid(g1.page, 'vault-again').fill('vault-pass-9');
+  await tid(g1.page, 'vault-save').click();
+  await g1.page.locator('.toast', { hasText: '열쇠 비밀번호를 정했어요' }).waitFor();
+  await g1.page.waitForTimeout(1500);
+  check(true, 'google: sets a vault password');
+  await g1.context.close();
+
+  const g2 = await googlePhone();
+  await tid(g2.page, 'google').click();
+  await tid(g2.page, 'vault-pass').waitFor({ timeout: 15000 });
+  await tid(g2.page, 'vault-pass').fill('wrong-vault');
+  await tid(g2.page, 'vault-open').click();
+  await g2.page.locator('.toast', { hasText: '열쇠 비밀번호가 맞지 않아요' }).waitFor();
+  await tid(g2.page, 'vault-pass').fill('vault-pass-9');
+  await tid(g2.page, 'vault-open').click();
+  await tid(g2.page, 'month').waitFor({ timeout: 15000 });
+  check(true, 'google: the vault password opens the calendar on a new phone');
+  await g2.context.close();
 } catch (e) {
   console.error(e);
   failures++;

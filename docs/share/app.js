@@ -296,7 +296,8 @@ async function boot() {
     return;
   }
   try {
-    state.uid = await store.start(config, { emulator });
+    // Inside the app, Google sign-in goes through the app, so no pop-up helper frame is loaded.
+    state.uid = await store.start(config, { emulator, popups: !inApp });
   } catch (e) {
     console.error(e);
     appEl().replaceChildren(
@@ -492,7 +493,14 @@ function idError(e) {
 
 /** Google in a browser shows a pop-up; inside the Android app the app signs in and hands over a token. */
 function canGoogle() {
-  return inApp ? !!bridge?.googleSignIn : googleSignIn || testMode;
+  if (inApp) {
+    try {
+      return !!bridge?.googleAvailable?.();
+    } catch {
+      return false;
+    }
+  }
+  return googleSignIn || testMode;
 }
 
 async function startGoogle(code) {

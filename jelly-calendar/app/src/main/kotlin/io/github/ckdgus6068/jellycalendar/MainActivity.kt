@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.lifecycleScope
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.ui.JellyCalendarApp
 import io.github.ckdgus6068.jellycalendar.ui.JellyPlatform
@@ -39,6 +40,7 @@ import io.github.ckdgus6068.jellycalendar.ui.theme.DarkJellyColors
 import io.github.ckdgus6068.jellycalendar.ui.theme.DisplayFace
 import io.github.ckdgus6068.jellycalendar.ui.theme.LightJellyColors
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -232,6 +234,24 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun hostState(): String = hostJson
+
+        /** Whether the app can sign in with Google for the page (set up in res/values/config.xml). */
+        @JavascriptInterface
+        fun googleAvailable(): Boolean = GoogleSignIn.isAvailable(this@MainActivity)
+
+        /** Shows the phone's Google account sheet; the answer goes to the page's jellyHost. */
+        @JavascriptInterface
+        fun googleSignIn() {
+            runOnUiThread {
+                lifecycleScope.launch {
+                    val js = when (val outcome = GoogleSignIn.idToken(this@MainActivity)) {
+                        is GoogleSignIn.Outcome.Token -> "window.jellyHost && window.jellyHost.googleToken(${JSONObject.quote(outcome.idToken)})"
+                        is GoogleSignIn.Outcome.Failed -> "window.jellyHost && window.jellyHost.googleFailed(${JSONObject.quote(outcome.reason)})"
+                    }
+                    sharedWeb?.evaluateJavascript(js, null)
+                }
+            }
+        }
 
         /**
          * The shared page found the golden jelly, on one of this phone's jellies ([personalId]) or on a

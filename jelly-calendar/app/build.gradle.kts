@@ -81,4 +81,8 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
+    // "구글로 시작하기" in the shared tab: the phone's Google account sheet (Credential Manager).
+    implementation(libs.credentials.core)
+    implementation(libs.credentials.playservices)
+    implementation(libs.googleid)
 }

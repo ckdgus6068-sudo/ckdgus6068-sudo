@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The Web client ID of the Firebase project's Google sign-in (Firebase console → Authentication →
+        Sign-in method → Google → Web SDK configuration). Not a secret. Empty: no "구글로 시작하기" in the app.
+    -->
+    <string name="google_web_client_id" translatable="false"></string>
+</resources>
