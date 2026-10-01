@@ -63,9 +63,12 @@ class PlannerTest {
         assertTrue(again.jellies.isEmpty())
     }
 
+    /** These tests count weeks from Monday; the app's default is Sunday. */
+    private val mondayWeeks = Settings(weekStartsOnSunday = false)
+
     @Test
     fun pastWeeksAreNeverFilled() {
-        val data = AppData(routines = listOf(run(since = monday.minusDays(30))))
+        val data = AppData(routines = listOf(run(since = monday.minusDays(30))), settings = mondayWeeks)
         val result = Planner.materialize(data, Planner.weekDays(monday.minusDays(7)), wednesday, 0L, ids)
         assertTrue(result.jellies.isEmpty())
     }
@@ -111,7 +114,7 @@ class PlannerTest {
 
     @Test
     fun refreshFillsEarlierDaysOfTheWeekAndRollsThem() {
-        val data = AppData(routines = listOf(run(since = monday)))
+        val data = AppData(routines = listOf(run(since = monday)), settings = mondayWeeks)
         val result = Planner.refresh(data, emptyList(), wednesday, 0L, ids)
         // Monday and Tuesday were never opened: they are laid down and rolled into the tray.
         assertEquals(2, Planner.tray(result).size)

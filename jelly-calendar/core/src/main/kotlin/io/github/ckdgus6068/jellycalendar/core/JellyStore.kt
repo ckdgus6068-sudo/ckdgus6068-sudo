@@ -93,6 +93,8 @@ class JellyStore(
 
     fun saveJelly(jelly: Jelly) = mutate { Planner.upsertJelly(it, jelly) }
 
+    fun setPinned(id: String, pinned: Boolean) = mutate { Planner.setPinned(it, id, pinned) }
+
     fun newJelly(
         title: String,
         flavor: Int,
@@ -101,6 +103,7 @@ class JellyStore(
         startMin: Int?,
         carryOver: Boolean = true,
         note: String = "",
+        pinned: Boolean = false,
     ): Jelly {
         val jelly = Jelly(
             id = newId(),
@@ -112,6 +115,7 @@ class JellyStore(
             carryOver = carryOver,
             note = note,
             createdAt = nowMillis(),
+            pinned = pinned && date != null && startMin != null,
         )
         mutate { Planner.upsertJelly(it, jelly) }
         return jelly

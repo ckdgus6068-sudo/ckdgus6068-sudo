@@ -13,12 +13,24 @@ object Planner {
 
     const val MIN_DURATION = 5
 
+    /** Longest jelly the editor offers: 12 hours. */
+    const val MAX_DURATION = 12 * 60
+
+    /** Pinned jellies a day can hold at the top of its box. */
+    const val MAX_PINNED = 3
+
     fun weekStart(date: LocalDate, sundayFirst: Boolean): LocalDate {
         val first = if (sundayFirst) DayOfWeek.SUNDAY else DayOfWeek.MONDAY
         return date.with(TemporalAdjusters.previousOrSame(first))
     }
 
     fun weekDays(start: LocalDate): List<LocalDate> = (0L..6L).map { start.plusDays(it) }
+
+    /** The six weeks shown for the month of [date], starting on the first day of its first week. */
+    fun monthGrid(date: LocalDate, sundayFirst: Boolean): List<LocalDate> {
+        val start = weekStart(date.withDayOfMonth(1), sundayFirst)
+        return (0L until 42L).map { start.plusDays(it) }
+    }
 
     fun materializeKey(routineId: String, date: LocalDate): String = "$routineId@$date"
 
@@ -59,6 +71,46 @@ object Planner {
 
     fun firstOfDay(data: AppData, date: LocalDate): Jelly? =
         scheduledOn(data, date).firstOrNull { it.status != JellyStatus.MISSED }
+
+    /** The pinned jellies of [date], in order of their start times. */
+    fun pinnedOn(data: AppData, date: LocalDate): List<Jelly> =
+        scheduledOn(data, date).filter { it.pinned && it.status != JellyStatus.MISSED }
+
+    /** Whether one more jelly (not counting [jellyId] itself) may be pinned on [date]. */
+    fun canPin(data: AppData, date: LocalDate, jellyId: String? = null): Boolean =
+        pinnedOn(data, date).count { it.id != jellyId } < MAX_PINNED
+
+    /**
+     * Start times that suit a jelly of [duration] minutes on [date]: the first free gap at or after
+     * [from], then later ones at least two hours apart, up to [count]. Used when a jelly comes out of
+     * the tray, so that the person picks the time instead of the app.
+     */
+    fun freeSlots(
+        data: AppData,
+        date: LocalDate,
+        duration: Int,
+        from: Int,
+        excludeId: String? = null,
+        count: Int = 3,
+        until: Int = 22 * 60,
+    ): List<Int> {
+        val busy = scheduledOn(data, date)
+            .filter { it.id != excludeId && it.status != JellyStatus.MISSED }
+            .mapNotNull { j -> j.startMin?.let { it until it + j.durationMin } }
+        fun fits(start: Int) = start + duration <= MINUTES_PER_DAY &&
+            busy.none { it.first < start + duration && start < it.last + 1 }
+        val slots = ArrayList<Int>()
+        var candidate = snap(from.coerceIn(0, MINUTES_PER_DAY - 1), 30).let { if (it < from) it + 30 else it }
+        while (slots.size < count && candidate <= until && candidate + duration <= MINUTES_PER_DAY) {
+            if (fits(candidate)) {
+                slots += candidate
+                candidate += maxOf(120, duration)
+            } else {
+                candidate += 30
+            }
+        }
+        return slots
+    }
 
     /** First start at or after [from] where [duration] minutes fit between the jellies of [date]. */
     fun findFreeSlot(
@@ -216,8 +268,20 @@ object Planner {
         return if (changed) copy(jellies = list) else this
     }
 
+    /**
+     * A day holds at most [MAX_PINNED] pinned jellies: when [jellyId] arrives pinned on a day that
+     * is already full, it is the one that lets go.
+     */
+    private fun limitPins(data: AppData, date: LocalDate?, jellyId: String): AppData {
+        if (date == null || pinnedOn(data, date).size <= MAX_PINNED) return data
+        return data.updateJelly(jellyId) { it.copy(pinned = false) }
+    }
+
     /** Moves a jelly to [date] at [startMin], or into the tray when either is null. */
     fun move(data: AppData, id: String, date: LocalDate?, startMin: Int?): AppData =
+        limitPins(moveOnly(data, id, date, startMin), date, id)
+
+    private fun moveOnly(data: AppData, id: String, date: LocalDate?, startMin: Int?): AppData =
         data.updateJelly(id) { j ->
             if (date == null || startMin == null) {
                 if (j.isInTray) {
@@ -230,6 +294,7 @@ object Planner {
                         completedAt = null,
                         wakeAnchored = false,
                         detached = true,
+                        pinned = false,
                     )
                 }
             } else {
@@ -276,12 +341,21 @@ object Planner {
         val fixed = jelly.copy(
             durationMin = clampDuration(jelly.durationMin, jelly.startMin),
             startMin = jelly.startMin?.let { clampStart(it, jelly.durationMin) },
+            pinned = jelly.pinned && jelly.isScheduled,
         )
-        return if (data.jellies.any { it.id == fixed.id }) {
+        val saved = if (data.jellies.any { it.id == fixed.id }) {
             data.copy(jellies = data.jellies.map { if (it.id == fixed.id) fixed else it })
         } else {
             data.copy(jellies = data.jellies + fixed)
         }
+        return limitPins(saved, fixed.date, fixed.id)
+    }
+
+    /** Pins a jelly to the top of its day's box, or lets it go; refused when the day is full. */
+    fun setPinned(data: AppData, id: String, pinned: Boolean): AppData {
+        val jelly = data.jelly(id) ?: return data
+        if (pinned && (!jelly.isScheduled || !canPin(data, jelly.date!!, id))) return data
+        return data.updateJelly(id) { it.copy(pinned = pinned) }
     }
 
     fun deleteJelly(data: AppData, id: String): AppData =

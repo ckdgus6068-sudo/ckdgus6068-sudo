@@ -59,6 +59,8 @@ data class Jelly(
     val note: String = "",
     val createdAt: Long = 0L,
     val completedAt: Long? = null,
+    /** Pinned ("젤위로 고정"): held at the top of its day's box, at most [Planner.MAX_PINNED] a day. */
+    val pinned: Boolean = false,
 ) {
     val isScheduled: Boolean get() = date != null && startMin != null
     val isInTray: Boolean get() = !isScheduled
@@ -103,7 +105,8 @@ data class Settings(
     val idleWobble: Boolean = true,
     val doneByDoubleTap: Boolean = true,
     val doneByLongPress: Boolean = true,
-    val weekStartsOnSunday: Boolean = false,
+    /** Weeks (and month grids) start on Sunday, as Korean wall calendars do. */
+    val weekStartsOnSunday: Boolean = true,
     val hintDismissed: Boolean = false,
     val boxHintDismissed: Boolean = false,
     /** The how-to screen opens by itself once, on the first launch that has it. */
