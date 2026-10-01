@@ -30,6 +30,13 @@ interface JellyPlatform {
      */
     fun setAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean = false
 
+    /**
+     * For an alarm on a later day: opens Samsung Clock's new-alarm screen with [hour]:[minute] and
+     * [label] filled in, where the person picks the date and saves. False when Samsung Clock is not
+     * there (other clock apps would set the alarm for the coming day instead).
+     */
+    fun openAlarmEditor(hour: Int, minute: Int, label: String): Boolean = false
+
     /** Opens the clock app's alarm list. */
     fun openAlarmList(): Boolean
 

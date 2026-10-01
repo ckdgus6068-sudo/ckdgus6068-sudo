@@ -63,6 +63,7 @@ import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.Routine
 import io.github.ckdgus6068.jellycalendar.core.WEEKDAYS
 import io.github.ckdgus6068.jellycalendar.core.WEEKEND
+import io.github.ckdgus6068.jellycalendar.ui.common.AlarmDateDialog
 import io.github.ckdgus6068.jellycalendar.ui.common.JellyButton
 import io.github.ckdgus6068.jellycalendar.ui.common.JellyChip
 import io.github.ckdgus6068.jellycalendar.ui.common.SwitchRow
@@ -175,6 +176,8 @@ fun JellyForm(
     canPin: (LocalDate?) -> Boolean = { true },
     /** Asks the clock app for an alarm at [minute] of the coming day; false when nothing took it. */
     onSetAlarm: ((minute: Int, label: String) -> Boolean)? = null,
+    /** Opens Samsung Clock's new-alarm screen for an alarm on a later day; false when it did not open. */
+    onPickAlarmDate: ((minute: Int, label: String) -> Boolean)? = null,
 ) {
     val colors = LocalJellyColors.current
     val type = LocalJellyType.current
@@ -307,7 +310,7 @@ fun JellyForm(
                         checked = state.pinned,
                         onChange = { if (!it || pinnable) state.pinned = it },
                     )
-                    AlarmRow(state, now, onSetAlarm)
+                    AlarmRow(state, now, onSetAlarm, onPickAlarmDate)
                     if (linked == null) {
                         Label("반복")
                         DaysPicker(state.days, allowNone = true) {
@@ -776,9 +779,18 @@ private fun TimeRow(state: EditorState, onPick: () -> Unit) {
     }
 }
 
-/** "시작 전 알람": asks the clock app for an alarm a little before the jelly starts. */
+/**
+ * "시작 전 알람": asks the clock app for an alarm a little before the jelly starts. The request takes
+ * a time but no date: in the coming 24 hours the alarm is set in one tap, and a later one is made in
+ * Samsung Clock's new-alarm screen, where the date is picked.
+ */
 @Composable
-private fun AlarmRow(state: EditorState, now: LocalDateTime, onSetAlarm: ((Int, String) -> Boolean)?) {
+private fun AlarmRow(
+    state: EditorState,
+    now: LocalDateTime,
+    onSetAlarm: ((Int, String) -> Boolean)?,
+    onPickDate: ((Int, String) -> Boolean)?,
+) {
     val colors = LocalJellyColors.current
     val date = state.date
     val start = state.start
@@ -788,12 +800,18 @@ private fun AlarmRow(state: EditorState, now: LocalDateTime, onSetAlarm: ((Int, 
         null
     }
     val ahead = at?.let { Duration.between(now, it) }
-    // The clock app takes a time but no date, so only the coming 24 hours are safe.
+    // The clock app takes a time but no date, so only the coming 24 hours are safe in one tap.
     val possible = onSetAlarm != null && ahead != null && !ahead.isNegative && ahead.toHours() < 24
+    val later = onPickDate != null && ahead != null && ahead.toHours() >= 24
     val atMinute = at?.let { it.hour * 60 + it.minute }
+    val title = state.title.trim().ifBlank { "젤리" }
+    val label = if (state.alarmBefore == 0) "$title 시작" else "$title ${state.alarmBefore}분 전"
     // The alarm already asked for in this sheet, so it is not asked for twice by accident.
     var asked by remember { mutableStateOf<LocalDateTime?>(null) }
     var failed by remember { mutableStateOf(false) }
+    // Samsung Clock was opened for this alarm (whether it was saved there is not known).
+    var opened by remember { mutableStateOf<LocalDateTime?>(null) }
+    var asking by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text("⏰ 시작 전 알람", color = colors.text, fontSize = 15.sp)
         Text(
@@ -804,6 +822,9 @@ private fun AlarmRow(state: EditorState, now: LocalDateTime, onSetAlarm: ((Int, 
                     asked != null && asked == at -> "${hm(atMinute!!)} 알람을 시계 앱에 부탁했어요. 띠링!"
                     at == null -> "날짜와 시간이 있는 젤리에 알람을 맞출 수 있어요."
                     possible -> "${hm(atMinute!!)}에 울리도록 시계 앱에 알람을 맞춰요."
+                    later && opened == at -> "삼성 시계에서 날짜를 골라 저장했다면 다 됐어요."
+                    later -> "하루 넘게 남은 알람은 삼성 시계에서 날짜를 골라 맞춰요."
+                    ahead != null && ahead.isNegative -> "이미 지난 시각이에요."
                     else -> "시계 앱은 날짜 없이 시각만 받아서, 24시간 안에 울릴 알람만 맞출 수 있어요."
                 },
             ),
@@ -812,25 +833,40 @@ private fun AlarmRow(state: EditorState, now: LocalDateTime, onSetAlarm: ((Int, 
             lineHeight = 16.sp,
         )
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            for ((before, label) in listOf(0 to "정각", 10 to "10분 전", 30 to "30분 전")) {
-                JellyChip(label, selected = state.alarmBefore == before, onClick = { state.alarmBefore = before })
+            for ((before, chip) in listOf(0 to "정각", 10 to "10분 전", 30 to "30분 전")) {
+                JellyChip(chip, selected = state.alarmBefore == before, onClick = { state.alarmBefore = before })
             }
             Spacer(Modifier.weight(1f))
             JellyButton(
-                text = if (asked != null && asked == at) "✓ 맞췄어요" else "알람 맞추기",
+                text = when {
+                    asked != null && asked == at -> "✓ 맞췄어요"
+                    later -> "날짜 골라 맞추기"
+                    else -> "알람 맞추기"
+                },
                 onClick = {
                     if (possible && at != null && atMinute != null) {
-                        val title = state.title.trim().ifBlank { "젤리" }
-                        val label = if (state.alarmBefore == 0) "$title 시작" else "$title ${state.alarmBefore}분 전"
                         val ok = onSetAlarm?.invoke(atMinute, label) == true
                         failed = !ok
                         asked = if (ok) at else null
+                    } else if (later) {
+                        asking = true
                     }
                 },
-                enabled = possible && asked != at,
+                enabled = (possible && asked != at) || later,
                 small = true,
             )
         }
+    }
+    if (asking && at != null && atMinute != null) {
+        AlarmDateDialog(
+            date = at.toLocalDate(),
+            minute = atMinute,
+            onOpen = {
+                asking = false
+                if (onPickDate?.invoke(atMinute, label) == true) opened = at
+            },
+            onDismiss = { asking = false },
+        )
     }
 }
 

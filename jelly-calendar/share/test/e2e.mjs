@@ -487,6 +487,7 @@ try {
       showDay: call('showDay'),
       foundGolden: call('foundGolden'),
       setAlarm: call('setAlarm'),
+      openAlarmEditor: call('openAlarmEditor'),
     };
   }, `${month}-17`);
   const called = (page, name, arg) => page.waitForFunction(
@@ -564,7 +565,7 @@ try {
   await app.mouse.click(shared.x, shared.y);
   await tid(app, 'memos').waitFor();
   check(true, 'all: a tap on a shared jelly opens it with its memos');
-  check(await tid(app, 'alarm').isDisabled(), 'all: the clock alarm waits for a jelly with a time in the coming day');
+  check(await tid(app, 'alarm').isDisabled(), 'all: the clock alarm waits for a jelly with a time');
   await app.goBack();
   await settled(app, 5);
   blobs = await box(app);
@@ -572,6 +573,29 @@ try {
   await app.mouse.click(football.x, football.y);
   await tid(app, 'memos').waitFor();
   check((await app.locator('.sheet-kicker').textContent()).includes('재훈·준헌'), 'all: a jelly of the other calendar opens in its calendar');
+  // Its alarm (10 minutes before 18:00): one tap within a day, else Samsung Clock, where the date is picked.
+  const kickoff = await app.evaluate((m) => new Date(`${m}-17T17:50:00`).getTime() - Date.now(), month);
+  const alarmText = (await tid(app, 'alarm').textContent()).trim();
+  if (kickoff >= 24 * 3600 * 1000) {
+    check(alarmText === '날짜 골라 맞추기' && !(await tid(app, 'alarm').isDisabled()),
+      `all: an alarm more than a day ahead is made by picking its date (${alarmText})`);
+    await tid(app, 'alarm').click();
+    await tid(app, 'ask').waitFor();
+    check((await tid(app, 'ask').textContent()).includes('17일을 고른'), 'all: it first says how to pick the date in Samsung Clock');
+    await shot(app, '11c-galaxy-alarm-date');
+    await tid(app, 'ask-yes').click();
+    await app.waitForFunction(
+      () => window.__calls.some((c) => c[0] === 'openAlarmEditor' && c[1] === 17 && c[2] === 50 && c[3] === '축구 10분 전'),
+      null,
+      { timeout: 5000 },
+    );
+    check(!(await app.evaluate(() => window.__calls.some((c) => c[0] === 'setAlarm'))),
+      'all: then Samsung Clock\'s new-alarm screen opens with the time filled in, and no alarm is set for the coming day');
+  } else if (kickoff >= 0) {
+    check(alarmText === '알람 맞추기' && !(await tid(app, 'alarm').isDisabled()), `all: an alarm within a day is set in one tap (${alarmText})`);
+  } else {
+    check(await tid(app, 'alarm').isDisabled(), 'all: an alarm already past cannot be set');
+  }
   await app.goBack();
 
   const room = await tid(app, 'box').boundingBox();

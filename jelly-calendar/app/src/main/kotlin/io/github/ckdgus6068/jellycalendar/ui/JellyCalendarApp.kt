@@ -277,6 +277,14 @@ fun JellyCalendarApp(
         confirmDelete = null
     }
 
+    // An alarm on a later day: Samsung Clock's new-alarm screen, where the date is picked. Without
+    // Samsung Clock, the alarm list (any clock app) to add it by hand.
+    fun openClockForDate(minute: Int, label: String): Boolean {
+        if (platform.openAlarmEditor(minute / 60, minute % 60, label)) return true
+        notify(if (platform.openAlarmList()) "알람 목록에서 +를 눌러 날짜를 골라 추가해 주세요" else "시계 앱을 열 수 없어요")
+        return false
+    }
+
     val actions = object : CalendarActions {
         override fun select(date: LocalDate) {
             selectedDay = date.toEpochDay()
@@ -333,6 +341,8 @@ fun JellyCalendarApp(
                 notify("알람을 맞출 시계 앱을 찾지 못했어요")
             }
         }
+
+        override fun openAlarmEditor(minute: Int, label: String): Boolean = openClockForDate(minute, label)
 
         override fun moveFirst(jelly: Jelly, date: LocalDate, minute: Int) = store.move(jelly.id, date, minute)
 
@@ -528,6 +538,7 @@ fun JellyCalendarApp(
                         onSetAlarm = { minute, label ->
                             platform.setAlarm(minute / 60, minute % 60, label, data.settings.alarmSkipUi)
                         },
+                        onPickAlarmDate = { minute, label -> openClockForDate(minute, label) },
                     )
                 }
             }

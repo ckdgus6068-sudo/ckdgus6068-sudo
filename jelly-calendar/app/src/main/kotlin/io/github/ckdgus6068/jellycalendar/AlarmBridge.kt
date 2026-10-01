@@ -15,7 +15,9 @@ import java.time.ZoneId
  *
  * Android offers these public doors, and this is all that is used:
  * - reading: [AlarmManager.getNextAlarmClock] tells the time of the next alarm set by any clock app;
- * - writing: [AlarmClock.ACTION_SET_ALARM] asks the clock app to create a one-time alarm;
+ * - writing: [AlarmClock.ACTION_SET_ALARM] asks the clock app to create a one-time alarm. It takes
+ *   a time but no date, so it rings within a day; for a later day Samsung Clock's own new-alarm
+ *   screen is opened instead, where the date can be picked;
  * - switching off: [AlarmClock.ACTION_DISMISS_ALARM] asks it to dismiss the alarm at a given time
  *   (a one-time alarm is turned off, a repeating one only skips its next ring).
  * Existing alarms cannot be listed, edited or deleted through a public API.
@@ -38,6 +40,22 @@ object AlarmBridge {
             .putExtra(AlarmClock.EXTRA_MESSAGE, label)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, skipUi)
         return startPreferringSamsung(activity, request)
+    }
+
+    /**
+     * For an alarm on a later day: opens Samsung Clock's new-alarm screen with [hour]:[minute] and
+     * [label] filled in. The request cannot carry a date, so the person picks it there (the calendar
+     * icon) and saves. Only Samsung Clock is asked: other clock apps may save the alarm for the
+     * coming day straight away. False when Samsung Clock is not there.
+     */
+    fun openAlarmEditor(activity: Activity, hour: Int, minute: Int, label: String): Boolean {
+        val request = Intent(AlarmClock.ACTION_SET_ALARM)
+            .setPackage(SAMSUNG_CLOCK)
+            .putExtra(AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, label)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+        return start(activity, request)
     }
 
     /**

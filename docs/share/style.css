@@ -1098,6 +1098,7 @@ textarea.input {
   line-height: 1.55;
   color: var(--text);
   word-break: keep-all;
+  white-space: pre-line;
 }
 
 .ask-buttons {

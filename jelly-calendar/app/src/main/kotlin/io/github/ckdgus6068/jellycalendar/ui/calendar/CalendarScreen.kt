@@ -82,6 +82,9 @@ interface CalendarActions {
     fun resize(jelly: Jelly, duration: Int)
     fun create(date: LocalDate?, start: Int?)
     fun setAlarm(date: LocalDate, minute: Int, label: String)
+
+    /** Samsung Clock's new-alarm screen for an alarm on a later day; false when it did not open. */
+    fun openAlarmEditor(minute: Int, label: String): Boolean
     fun moveFirst(jelly: Jelly, date: LocalDate, minute: Int)
     fun openAlarms()
     fun openRoutines()
@@ -161,10 +164,12 @@ fun CalendarScreen(
                     val status = WakeLogic.status(data, selected, now)
                     WakeCard(
                         status = status,
+                        date = selected,
                         gapMin = data.settings.wakeGapMin,
                         source = data.wakeOn(selected)?.source,
                         requestedMin = data.lastAlarmRequest?.takeIf { it.date == selected }?.minute,
                         onSetAlarm = { minute, label -> actions.setAlarm(selected, minute, label) },
+                        onPickDate = { minute, label -> actions.openAlarmEditor(minute, label) },
                         onMoveFirst = { jelly, minute -> actions.moveFirst(jelly, selected, minute) },
                         onOpenAlarms = { actions.openAlarms() },
                         modifier = Modifier.padding(horizontal = 12.dp).padding(top = 8.dp),

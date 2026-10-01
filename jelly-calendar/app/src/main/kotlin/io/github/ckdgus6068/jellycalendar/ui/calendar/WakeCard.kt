@@ -13,6 +13,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,25 +32,31 @@ import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
 import io.github.ckdgus6068.jellycalendar.core.WakeStatus
 import io.github.ckdgus6068.jellycalendar.ui.alarmSourceName
+import io.github.ckdgus6068.jellycalendar.ui.common.AlarmDateDialog
 import io.github.ckdgus6068.jellycalendar.ui.common.JellyButton
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.hmTo
 import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import java.time.LocalDate
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The link between the alarm clock and the first jelly of the day, with one-tap fixes when
- * they drifted apart.
+ * The link between the alarm clock and the first jelly of [date], with one-tap fixes when
+ * they drifted apart. An alarm more than a day ahead cannot be set in one tap (the request has no
+ * date): [onPickDate] opens Samsung Clock's new-alarm screen, after a word on picking the date there,
+ * and says whether it opened.
  */
 @Composable
 fun WakeCard(
     status: WakeStatus,
+    date: LocalDate,
     gapMin: Int,
     source: String?,
     requestedMin: Int?,
     onSetAlarm: (minute: Int, label: String) -> Unit,
+    onPickDate: (minute: Int, label: String) -> Boolean,
     onMoveFirst: (Jelly, Int) -> Unit,
     onOpenAlarms: () -> Unit,
     modifier: Modifier = Modifier,
@@ -53,10 +64,15 @@ fun WakeCard(
     if (status is WakeStatus.Empty) return
     val colors = LocalJellyColors.current
     val sourceName = source?.let { alarmSourceName(it) }
+    // The alarm about to be set in Samsung Clock (the dialog is up), and the one it was opened for.
+    var asking by remember(date) { mutableStateOf<Pair<Int, String>?>(null) }
+    var opened by rememberSaveable(date) { mutableStateOf<Int?>(null) }
 
     var title: String
     var subtitle: String
     val actions = ArrayList<Pair<String, () -> Unit>>()
+    // Shown after "알람 목록".
+    val extras = ArrayList<Pair<String, () -> Unit>>()
     var tone = colors.wake
     when (status) {
         is WakeStatus.Synced -> {
@@ -78,12 +94,20 @@ fun WakeCard(
             } else if (requestedMin == status.suggestedAlarm) {
                 title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
                 subtitle = "${hm(requestedMin)} 알람을 요청했어요. 예전 ${hm(status.alarmMin)} 알람이 아직 켜져 있다면 시계 앱에서 꺼 주세요."
+            } else if (!status.canSetNow && opened == status.suggestedAlarm) {
+                title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
+                subtitle = "새 ${hm(status.suggestedAlarm)} 알람을 저장했다면, 예전 ${hm(status.alarmMin)} 알람은 시계 앱에서 꺼 주세요."
+                extras += "삼성 시계 다시 열기" to { asking = status.suggestedAlarm to "젤리 · ${first.title}" }
             } else {
                 title = "알람 ${hm(status.alarmMin)} · 첫 일과 ${hm(start)} ${first.title}"
                 subtitle = "알람 뒤 ${start - status.alarmMin}분 만에 시작해요 (설정은 ${gapMin}분)"
                 if (status.canSetNow) {
                     actions += "알람을 ${hmTo(status.suggestedAlarm)}" to {
                         onSetAlarm(status.suggestedAlarm, "젤리 · ${first.title}")
+                    }
+                } else {
+                    actions += "날짜 골라 ${hm(status.suggestedAlarm)} 맞추기" to {
+                        asking = status.suggestedAlarm to "젤리 · ${first.title}"
                     }
                 }
                 if (first.status == JellyStatus.PLANNED) {
@@ -102,8 +126,15 @@ fun WakeCard(
                 actions += "알람 ${hm(status.suggestedAlarm)} 맞추기" to {
                     onSetAlarm(status.suggestedAlarm, "젤리 · ${first.title}")
                 }
+            } else if (opened == status.suggestedAlarm) {
+                subtitle = "삼성 시계에서 날짜를 골라 ${hm(status.suggestedAlarm)} 알람을 저장했다면 다 됐어요"
+                extras += "삼성 시계 다시 열기" to { asking = status.suggestedAlarm to "젤리 · ${first.title}" }
             } else {
-                subtitle = "전날 저녁부터 ${hm(status.suggestedAlarm)} 알람을 맞출 수 있어요"
+                // Only the phone's next alarm can be read, so an alarm this far ahead is not known yet.
+                subtitle = "하루 넘게 남은 알람은 삼성 시계에서 날짜를 골라 맞춰요"
+                actions += "날짜 골라 ${hm(status.suggestedAlarm)} 맞추기" to {
+                    asking = status.suggestedAlarm to "젤리 · ${first.title}"
+                }
             }
         }
         is WakeStatus.AlarmOnly -> {
@@ -113,6 +144,19 @@ fun WakeCard(
         WakeStatus.Empty -> return
     }
     actions += "알람 목록" to onOpenAlarms
+    actions += extras
+
+    asking?.let { (minute, label) ->
+        AlarmDateDialog(
+            date = date,
+            minute = minute,
+            onOpen = {
+                asking = null
+                if (onPickDate(minute, label)) opened = minute
+            },
+            onDismiss = { asking = null },
+        )
+    }
 
     Column(
         modifier

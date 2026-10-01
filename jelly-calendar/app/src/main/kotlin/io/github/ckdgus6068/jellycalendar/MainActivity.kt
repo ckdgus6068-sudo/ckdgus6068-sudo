@@ -105,6 +105,9 @@ class MainActivity : ComponentActivity() {
         override fun setAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean =
             AlarmBridge.setAlarm(this@MainActivity, hour, minute, label, skipUi)
 
+        override fun openAlarmEditor(hour: Int, minute: Int, label: String): Boolean =
+            AlarmBridge.openAlarmEditor(this@MainActivity, hour, minute, label)
+
         override fun openAlarmList(): Boolean = AlarmBridge.openAlarmList(this@MainActivity)
 
         override fun shareText(text: String, title: String): Boolean = runCatching {
@@ -272,6 +275,22 @@ class MainActivity : ComponentActivity() {
                 val skipUi = app.store.current.settings.alarmSkipUi
                 if (!AlarmBridge.setAlarm(this@MainActivity, hour, minute, label.take(60), skipUi)) {
                     toast("알람을 맞출 시계 앱을 찾지 못했어요")
+                }
+            }
+        }
+
+        /**
+         * A clock alarm for a shared jelly on a later day: Samsung Clock's new-alarm screen, where
+         * the date is picked (the page has already said how). Without Samsung Clock, the alarm list.
+         */
+        @JavascriptInterface
+        fun openAlarmEditor(hour: Int, minute: Int, label: String) {
+            if (hour !in 0..23 || minute !in 0..59) return
+            runOnUiThread {
+                when {
+                    AlarmBridge.openAlarmEditor(this@MainActivity, hour, minute, label.take(60)) -> Unit
+                    AlarmBridge.openAlarmList(this@MainActivity) -> toast("알람 목록에서 +를 눌러 날짜를 골라 추가해 주세요")
+                    else -> toast("시계 앱을 열 수 없어요")
                 }
             }
         }

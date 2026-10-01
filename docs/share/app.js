@@ -1907,12 +1907,17 @@ function stretchLength(get, set, onEnd) {
 
 /**
  * "⏰ 시작 전 알람" inside the Android app: the app asks the clock app for an alarm a little before the
- * jelly starts. The clock app takes a time but no date, so only the coming 24 hours are offered.
+ * jelly starts. The request takes a time but no date: an alarm in the coming 24 hours is set in one
+ * tap, and a later one is made in Samsung Clock's new-alarm screen, where the date is picked.
  */
 function alarmRow(draft) {
   if (!bridge?.setAlarm) return null;
+  const DAY_MS = 24 * 3600 * 1000;
+  const canPick = typeof bridge.openAlarmEditor === 'function';
   let before = 10;
   let asked = null;
+  // Samsung Clock was opened for this alarm (whether it was saved there is not known).
+  let opened = null;
   const note = h('small', { class: 'toggle-note' });
   const chips = h('div', { class: 'row' });
   const button = h('button', { class: 'btn small-btn', type: 'button', 'data-testid': 'alarm' }, '알람 맞추기');
@@ -1921,34 +1926,59 @@ function alarmRow(draft) {
     const d = parseDay(draft.date);
     return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, draft.start - before);
   };
+  const label = () => {
+    const title = (draft.title || '젤리').trim();
+    return before === 0 ? `${title} 시작` : `${title} ${before}분 전`;
+  };
+  const clock = (t) => hm(t.getHours() * 60 + t.getMinutes());
   const paint = () => {
     const t = at();
     const ahead = t ? t.getTime() - Date.now() : null;
-    const possible = ahead != null && ahead >= 0 && ahead < 24 * 3600 * 1000;
+    const possible = ahead != null && ahead >= 0 && ahead < DAY_MS;
+    const later = canPick && ahead != null && ahead >= DAY_MS;
     const done = asked != null && t && asked === t.getTime();
-    chips.replaceChildren(...[[0, '정각'], [10, '10분 전'], [30, '30분 전']].map(([m, label]) => h('button', {
+    chips.replaceChildren(...[[0, '정각'], [10, '10분 전'], [30, '30분 전']].map(([m, text]) => h('button', {
       class: `chip${before === m ? ' on' : ''}`,
       type: 'button',
       onClick: () => {
         before = m;
         paint();
       },
-    }, label)));
+    }, text)));
     note.textContent = !t
       ? '날짜와 시간이 있는 젤리에 알람을 맞출 수 있어요.'
       : done
-        ? `${hm(t.getHours() * 60 + t.getMinutes())} 알람을 시계 앱에 부탁했어요. 띠링!`
+        ? `${clock(t)} 알람을 시계 앱에 부탁했어요. 띠링!`
         : possible
-          ? `${hm(t.getHours() * 60 + t.getMinutes())}에 울리도록 시계 앱에 알람을 맞춰요.`
-          : '시계 앱은 날짜 없이 시각만 받아서, 24시간 안에 울릴 알람만 맞출 수 있어요.';
-    button.disabled = !possible || done;
-    button.textContent = done ? '✓ 맞췄어요' : '알람 맞추기';
+          ? `${clock(t)}에 울리도록 시계 앱에 알람을 맞춰요.`
+          : later && opened === t.getTime()
+            ? '삼성 시계에서 날짜를 골라 저장했다면 다 됐어요.'
+            : later
+              ? '하루 넘게 남은 알람은 삼성 시계에서 날짜를 골라 맞춰요.'
+              : ahead < 0
+                ? '이미 지난 시각이에요.'
+                : '시계 앱은 날짜 없이 시각만 받아서, 24시간 안에 울릴 알람만 맞출 수 있어요.';
+    button.disabled = !(possible || later) || done;
+    button.textContent = done ? '✓ 맞췄어요' : later ? '날짜 골라 맞추기' : '알람 맞추기';
   };
-  button.addEventListener('click', () => {
+  button.addEventListener('click', async () => {
     const t = at();
     if (!t) return;
-    const title = (draft.title || '젤리').trim();
-    bridge.setAlarm(t.getHours(), t.getMinutes(), before === 0 ? `${title} 시작` : `${title} ${before}분 전`);
+    if (canPick && t.getTime() - Date.now() >= DAY_MS) {
+      const go = await askYesNo(
+        `알람 요청에는 날짜를 담을 수 없어서, 삼성 시계의 알람 추가 화면을 열어 드릴게요.\n\n`
+          + `1. 시각이 ${clock(t)}인지 확인하고\n`
+          + `2. 달력 아이콘을 눌러 ${t.getMonth() + 1}월 ${t.getDate()}일을 고른 다음\n`
+          + '3. ‘저장’을 눌러 주세요.',
+        { yes: '삼성 시계 열기', no: '취소' },
+      );
+      if (!go) return;
+      bridge.openAlarmEditor(t.getHours(), t.getMinutes(), label());
+      opened = t.getTime();
+      paint();
+      return;
+    }
+    bridge.setAlarm(t.getHours(), t.getMinutes(), label());
     asked = t.getTime();
     paint();
   });
