@@ -421,6 +421,57 @@ const taxi = [
   stroke(line([20, -133], [20, -119]), DARK, 3.4),
 ];
 
+/** 태극: red over blue with the S between them. */
+function taegeuk(cx, cy, r) {
+  const k = K * r;
+  return [
+    fill(circle(cx, cy, r), '#2F6FD8'),
+    fill(new P()
+      .M(cx - r, cy)
+      .C(cx - r, cy - k, cx - k, cy - r, cx, cy - r)
+      .C(cx + k, cy - r, cx + r, cy - k, cx + r, cy)
+      .C(cx + r, cy + r * 0.55, cx, cy + r * 0.55, cx, cy)
+      .C(cx, cy - r * 0.55, cx - r, cy - r * 0.55, cx - r, cy)
+      .Z(), '#E5484D'),
+  ];
+}
+
+/** A 무궁화 with a 태극 in the middle, as on Korean police caps (made simple). */
+function mugunghwa(cx, cy, r) {
+  const parts = [];
+  for (let i = 0; i < 5; i++) parts.push(fill(ellipse(cx, cy - r * 0.56, r * 0.4, r * 0.52).rotate(i * 72, cx, cy), GOLD));
+  parts.push(fill(circle(cx, cy, r * 0.46), WHITE));
+  parts.push(...taegeuk(cx, cy, r * 0.36));
+  return parts;
+}
+
+/** The navy 근무모: a cap with a short brim and the emblem at the front. */
+function policeCap() {
+  return [
+    fill(cap(64, -92, -138, 4), '#22305A'),
+    fill(new P().M(-60, -92).Q(0, -72, 60, -92).Q(0, -84, -60, -92).Z(), '#141C36'),
+    stroke(new P().M(-62, -95).Q(0, -103, 62, -95), '#3A4B80', 3),
+    ...mugunghwa(0, -115, 15),
+  ];
+}
+
+// The fluorescent yellow vest over a navy shirt, with a shining band.
+const policeVest = [
+  fill(poly([-24, 40], [24, 40], [0, 70]), '#22305A', { on: 'body' }),
+  fill(new P().M(-86, 48).Q(-52, 30, -24, 40).L(-8, 100).Q(-62, 94, -86, 48).Z(), '#D9F23A', { on: 'body' }),
+  fill(new P().M(-86, 48).Q(-52, 30, -24, 40).L(-8, 100).Q(-62, 94, -86, 48).Z().mirror(), '#D9F23A', { on: 'body' }),
+  fill(rrect(-82, 72, 66, 8, 4), '#E9EEF2', { on: 'body' }),
+  fill(rrect(16, 72, 66, 8, 4), '#E9EEF2', { on: 'body' }),
+  ...mugunghwa(-44, 56, 7).map((p) => ({ ...p, on: 'body' })),
+];
+
+// 경광봉: the glowing traffic baton.
+const lightBaton = [
+  fill(rrect(82, -160, 14, 60, 7).rotate(28, 89, -118), '#FF6A3D'),
+  fill(rrect(86, -154, 6, 48, 3).rotate(28, 89, -118), '#FFD0A8'),
+  fill(rrect(81, -102, 16, 26, 5).rotate(28, 89, -118), DARK),
+];
+
 // ---------------------------------------------------------------- jobs
 
 const JOBS = [
@@ -428,29 +479,10 @@ const JOBS = [
     id: 'police',
     name: '경찰관',
     variants: [
-      // 정모: the peaked cap with a gold emblem.
-      [
-        ...worn([
-          fill(new P().M(-64, -96).C(-70, -124, -40, -140, 0, -140).C(40, -140, 70, -124, 64, -96).Z(), NAVY),
-          fill(rrect(-62, -104, 124, 17, 7), NAVY_DEEP),
-          fill(new P().M(-54, -90).Q(0, -64, 54, -90).Q(0, -78, -54, -90).Z(), '#121218'),
-          fill(star(0, -122, 11), GOLD),
-        ]),
-        fill(star(-36, 56, 10), GOLD, { on: 'body' }),
-        fill(rrect(18, 48, 28, 10, 3), '#5C7FC8', { on: 'body' }),
-      ],
-      // 근무모: a cap with a short brim, and a whistle on a cord.
-      [
-        ...worn([
-          fill(ellipse(0, -90, 74, 10), NAVY_DEEP),
-          fill(cap(64, -92, -138, 4), '#2F4A8A'),
-          fill(circle(0, -114, 11), GOLD),
-          fill(star(0, -114, 7), GOLD_DEEP),
-        ]),
-        stroke(new P().M(-44, 40).Q(-34, 84, 14, 80), NAVY_DEEP, 3, { on: 'body' }),
-        fill(rrect(12, 72, 26, 15, 7), STEEL, { on: 'body' }),
-        fill(circle(32, 79, 4), '#8C939C', { on: 'body' }),
-      ],
+      // 근무모 with the 무궁화 emblem, and the fluorescent vest of the patrol.
+      [...worn(policeCap()), ...policeVest],
+      // The same cap and vest, and a light baton held up.
+      [...lightBaton, ...worn(policeCap()), ...policeVest],
     ],
   },
   {
