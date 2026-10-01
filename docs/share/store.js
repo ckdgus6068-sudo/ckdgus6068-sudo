@@ -168,15 +168,23 @@ export async function signInWithId(id, password) {
  */
 export async function signInWithGoogle(idToken) {
   const current = auth.currentUser;
-  if (idToken) {
-    const credential = GoogleAuthProvider.credential(idToken);
-    if (current?.isAnonymous) await linkWithCredential(current, credential);
-    else await signInWithCredential(auth, credential);
-  } else {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    if (current?.isAnonymous) await linkWithPopup(current, provider);
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const credential = idToken ? GoogleAuthProvider.credential(idToken) : null;
+  if (!current?.isAnonymous) {
+    if (credential) await signInWithCredential(auth, credential);
     else await signInWithPopup(auth, provider);
+    return;
+  }
+  try {
+    if (credential) await linkWithCredential(current, credential);
+    else await linkWithPopup(current, provider);
+  } catch (e) {
+    // That Google account already has its own user here: sign in to it instead.
+    if (e?.code !== 'auth/credential-already-in-use' && e?.code !== 'auth/email-already-in-use') throw e;
+    const existing = credential || GoogleAuthProvider.credentialFromError(e);
+    if (!existing) throw e;
+    await signInWithCredential(auth, existing);
   }
 }
 

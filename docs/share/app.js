@@ -487,6 +487,8 @@ function idError(e) {
   if (['auth/invalid-credential', 'auth/invalid-login-credentials', 'auth/wrong-password', 'auth/user-not-found'].includes(code)) return '아이디나 비밀번호가 맞지 않아요';
   if (code === 'auth/too-many-requests') return '여러 번 틀려서 잠시 막혔어요. 조금 뒤에 다시 해 주세요';
   if (code === 'auth/operation-not-allowed') return '아직 이 로그인 방법이 켜져 있지 않아요';
+  if (code === 'auth/unauthorized-domain') return '이 주소에서는 아직 구글 로그인이 허용되지 않았어요. 아이디로 시작해 주세요';
+  if (code === 'auth/popup-blocked') return '팝업이 막혔어요. 브라우저에서 팝업을 허용한 뒤 다시 눌러 주세요';
   if (code === 'auth/network-request-failed') return '인터넷 연결을 확인해 주세요';
   return '잠시 후 다시 해 주세요';
 }
@@ -656,7 +658,9 @@ function renderWelcome(code = '') {
   leaveBox();
   screen = 'welcome';
   document.body.classList.remove('fill', 'has-bar');
-  if (!store.account()) {
+  // Nobody signed in, or someone from before accounts with no calendar left: an account first.
+  const who = store.account();
+  if (!who || (who.kind === 'guest' && !savedSpaces().length)) {
     appEl().replaceChildren(
       h('div', { class: 'welcome', 'data-testid': 'account-step' },
         h('img', { class: 'logo', src: 'icons/icon-192.png', alt: '' }),
