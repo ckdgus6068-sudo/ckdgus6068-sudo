@@ -231,7 +231,7 @@ class MainActivity : ComponentActivity() {
     private fun showSharedProblem(web: WebView) {
         val page = """
             <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-            <body style="font-family:sans-serif;text-align:center;padding:72px 24px;color:#8C8089">
+            <body style="font-family:sans-serif;text-align:center;padding:72px 24px;color:#8C8089;word-break:keep-all">
             <p style="font-size:18px;color:#2B2530">공유 젤리를 열지 못했어요</p>
             <p>인터넷 연결을 확인하거나, 잠시 뒤 다시 시도해 주세요.</p>
             <p><a href="$SHARE_URL" style="color:#FF6F93;font-weight:bold">다시 시도</a></p>
