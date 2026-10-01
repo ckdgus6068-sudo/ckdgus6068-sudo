@@ -18,16 +18,17 @@ WEB = ROOT / 'docs/share/holidays.js'
 # Short labels for a calendar cell; the full name is shown where there is room.
 SHORT = {
     '신정연휴': '신정',
-    '설날 전날': '설 연휴',
+    '설날 전날': '설날',
     '설날': '설날',
-    '설날 다음날': '설 연휴',
-    '추석 전날': '추석 연휴',
+    '설날 다음날': '설날',
+    '추석 전날': '추석',
     '추석': '추석',
-    '추석 다음날': '추석 연휴',
+    '추석 다음날': '추석',
     '기독탄신일': '성탄절',
     '대통령 선거일': '대선',
     '국회의원 선거일': '총선',
     '지방선거일': '지방선거',
+    '임시공휴일': '임시휴일',
 }
 FULL = {
     '신정연휴': '신정',
@@ -38,7 +39,7 @@ FULL = {
 def label(name):
     parts = [p.strip() for p in name.split(';')]
     if any('대체 휴일' in p for p in parts):
-        return '대체공휴일', '대체공휴일'
+        return '대체공휴일', '대체휴일'
     full = '·'.join(FULL.get(p, p) for p in parts)
     short = SHORT.get(parts[0], parts[0])
     return full, short

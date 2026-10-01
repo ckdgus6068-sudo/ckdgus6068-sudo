@@ -1,18 +1,21 @@
 // Keeps the page itself available offline. Pages are fetched from the network first, so a new
 // version shows up as soon as it is online; fonts and icons come from the cache first.
-const CACHE = 'jelly-share-v2';
+const CACHE = 'jelly-share-v3';
+// The other letterings are cached the first time they are picked.
 const SHELL = [
   './',
   'index.html',
   'app.js',
   'box.js',
   'store.js',
+  'crypto.js',
+  'holidays.js',
   'config.js',
   'style.css',
   'vendor/firebase.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
-  'fonts/bagel-fat-one.woff2',
+  'fonts/nanum-square-round-extrabold.ttf',
   'fonts/pretendard/pretendardvariable-dynamic-subset.css',
 ];
 
@@ -32,7 +35,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== location.origin) return;
-  const stable = /\.(woff2|png)$/.test(url.pathname);
+  const stable = /\.(woff2|ttf|png)$/.test(url.pathname);
   event.respondWith(stable ? cacheFirst(request) : networkFirst(request));
 });
 

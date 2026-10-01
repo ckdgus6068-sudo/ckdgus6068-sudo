@@ -17,11 +17,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
+import io.github.ckdgus6068.jellycalendar.core.GoldenFind
 import io.github.ckdgus6068.jellycalendar.core.NextAlarm
 import io.github.ckdgus6068.jellycalendar.core.Settings
 import io.github.ckdgus6068.jellycalendar.ui.alarmSourceName
@@ -34,6 +36,8 @@ import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.keepWords
 import io.github.ckdgus6068.jellycalendar.ui.shortDate
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
+import io.github.ckdgus6068.jellycalendar.ui.theme.FontChoices
+import io.github.ckdgus6068.jellycalendar.ui.theme.fontName
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import io.github.ckdgus6068.jellycalendar.ui.theme.jellyType
 
@@ -47,6 +51,9 @@ fun SettingsScreen(
     onOpenGuide: () -> Unit,
     fonts: BundledFonts,
     appVersion: String,
+    /** The golden jelly, once found on this phone: its code can be looked at again here. */
+    golden: GoldenFind? = null,
+    onOpenGolden: () -> Unit = {},
     onOpenAlarms: () -> Unit,
     onClearTray: () -> Unit,
     onExport: () -> Unit,
@@ -170,13 +177,13 @@ fun SettingsScreen(
             SectionTitle("화면")
             Text("글씨체", color = colors.text, fontSize = 15.sp)
             ChipRow(
-                options = listOf(FontChoice.ROUND, FontChoice.CLEAN, FontChoice.SYSTEM),
+                options = FontChoices,
                 selected = settings.font,
                 label = { fontName(it) },
                 family = { jellyType(it, fonts).display },
             ) { v -> onChange { it.copy(font = v) } }
             Text(
-                keepWords("말랑은 젤리와 제목을 둥글고 굵은 글씨로, 나머지를 깔끔한 글씨로 써요. 휴대폰 글꼴은 휴대폰 설정의 글꼴을 따라요."),
+                keepWords("젤리 이름과 제목에 쓰는 글씨예요. 나머지는 읽기 편한 글씨로 써요. 휴대폰 글꼴은 휴대폰 설정을 따라요."),
                 color = colors.textSub,
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
@@ -206,6 +213,16 @@ fun SettingsScreen(
                 enabled = trayCount > 0,
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (golden != null) {
+                Spacer(Modifier.height(16.dp))
+                JellyButton(
+                    "🏆 황금 젤리 코드 보기",
+                    onClick = onOpenGolden,
+                    filled = false,
+                    color = Color(0xFFD99A00),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             if (appVersion.isNotEmpty()) {
                 Text(
                     "젤리 캘린더 $appVersion",
@@ -217,12 +234,6 @@ fun SettingsScreen(
             Spacer(Modifier.height(40.dp))
         }
     }
-}
-
-private fun fontName(choice: FontChoice): String = when (choice) {
-    FontChoice.ROUND -> "말랑"
-    FontChoice.CLEAN -> "깔끔"
-    FontChoice.SYSTEM -> "휴대폰 글꼴"
 }
 
 @Composable

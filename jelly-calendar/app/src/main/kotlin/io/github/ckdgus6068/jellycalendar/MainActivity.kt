@@ -29,12 +29,14 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
+import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.ui.JellyCalendarApp
 import io.github.ckdgus6068.jellycalendar.ui.JellyPlatform
 import io.github.ckdgus6068.jellycalendar.ui.SharedHost
 import io.github.ckdgus6068.jellycalendar.ui.SharedHostActions
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.DarkJellyColors
+import io.github.ckdgus6068.jellycalendar.ui.theme.DisplayFace
 import io.github.ckdgus6068.jellycalendar.ui.theme.LightJellyColors
 import java.time.LocalDate
 import org.json.JSONArray
@@ -96,7 +98,15 @@ class MainActivity : ComponentActivity() {
             return true
         }
 
+        override fun setAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean =
+            AlarmBridge.setAlarm(this@MainActivity, hour, minute, label, skipUi)
+
         override fun openAlarmList(): Boolean = AlarmBridge.openAlarmList(this@MainActivity)
+
+        override fun shareText(text: String, title: String): Boolean = runCatching {
+            val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+            startActivity(Intent.createChooser(send, title))
+        }.isSuccess
 
         override fun exportBackup(fileName: String, json: String) {
             pendingExport = json
@@ -136,14 +146,20 @@ class MainActivity : ComponentActivity() {
             }.getOrNull().orEmpty()
 
         override val fonts = BundledFonts(
-            // One heavy weight only: declared as Black so that Compose never fakes a bolder one.
-            round = FontFamily(Font(R.font.bagel_fat_one, FontWeight.Black)),
             clean = FontFamily(
                 Font(R.font.pretendard_regular, FontWeight.Normal),
                 Font(R.font.pretendard_semibold, FontWeight.SemiBold),
                 Font(R.font.pretendard_bold, FontWeight.Bold),
             ),
+            // Each display face has one weight, declared as such so that Compose never fakes another.
+            faces = mapOf(
+                FontChoice.NANUM_ROUND to face(R.font.nanum_square_round_extrabold, FontWeight.ExtraBold),
+                FontChoice.JUA to face(R.font.jua_regular, FontWeight.Normal),
+                FontChoice.ROUND to face(R.font.bagel_fat_one, FontWeight.Black),
+            ),
         )
+
+        private fun face(id: Int, weight: FontWeight) = DisplayFace(FontFamily(Font(id, weight)), weight)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -217,6 +233,15 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun hostState(): String = hostJson
 
+        /**
+         * The shared page found the golden jelly, on one of this phone's jellies ([personalId]) or on a
+         * shared one (empty). The app keeps one code per phone and celebrates.
+         */
+        @JavascriptInterface
+        fun foundGolden(personalId: String) {
+            runOnUiThread { app.store.makeGolden(personalId.ifEmpty { null }) }
+        }
+
         @JavascriptInterface
         fun openPersonal(id: String) = onHost { it.openPersonal(id) }
 
@@ -231,6 +256,12 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun shiftDay(direction: Int) = onHost { it.shiftDay(direction) }
+
+        @JavascriptInterface
+        fun showDay(date: String) {
+            val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return
+            onHost { it.showDay(day) }
+        }
 
         @JavascriptInterface
         fun showShared() = onHost { it.showShared() }
@@ -257,10 +288,12 @@ class MainActivity : ComponentActivity() {
                     JSONObject()
                         .put("id", jelly.id)
                         .put("title", jelly.title)
+                        .put("date", jelly.date?.toString() ?: JSONObject.NULL)
                         .put("start", jelly.startMin ?: JSONObject.NULL)
                         .put("duration", jelly.durationMin)
                         .put("flavor", jelly.flavor)
-                        .put("done", jelly.isDone),
+                        .put("done", jelly.isDone)
+                        .put("pinned", jelly.pinned),
                 )
             }
         }
@@ -269,6 +302,8 @@ class MainActivity : ComponentActivity() {
             .put("date", host.date.toString())
             .put("doubleTap", host.doneByDoubleTap)
             .put("longPress", host.doneByLongPress)
+            .put("sundayFirst", host.weekStartsOnSunday)
+            .put("font", host.font.name)
             .put("personal", personal)
             .toString()
     }

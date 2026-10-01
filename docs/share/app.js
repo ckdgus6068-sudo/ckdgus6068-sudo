@@ -1,7 +1,7 @@
 // 공유 젤리: a month of jellies shared by two (or a few) people, on iPhone, Android or any browser.
 import { firebaseConfig, publicUrl } from './config.js';
 import * as store from './store.js';
-import { JellyBox } from './box.js';
+import { JellyBox, setTitleFace } from './box.js';
 
 // ---------------------------------------------------------------- look
 
@@ -18,7 +18,23 @@ const FLAVORS = [
   { name: '우유', light: '#F4F6FA', base: '#D7DDE7', deep: '#7F8BA1', ink: '#3A4252' },
 ];
 const MEMBER_COLORS = ['#FF6F93', '#3F74F0', '#26B386', '#F07B3C', '#8850DA', '#9C5D3A'];
+// The jelly lettering, the same choices as the app's settings (FontChoice there).
+const FONTS = [
+  { id: 'NANUM_ROUND', name: '동글', family: '"NanumSquareRound", "Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 800 },
+  { id: 'JUA', name: '말랑', family: '"Jua", "Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 400 },
+  { id: 'CLEAN', name: '깔끔', family: '"Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 700 },
+  { id: 'ROUND', name: '통통', family: '"Bagel Fat One", "Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 900 },
+  { id: 'SYSTEM', name: '휴대폰 글꼴', family: 'system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif', weight: 800 },
+];
 const DURATIONS = [30, 60, 90, 120, 180, 240];
+
+// The hidden golden jelly, as in the app (GoldenJelly.kt): grab one jelly in the box and let it go
+// 50 times without a break. Who finders are sent to is written here and in the app (GoldenDialog.kt).
+const MAKER = '황OO';
+const GOLDEN_GRABS = 50;
+const GOLDEN_HINT = 25;
+const GOLDEN_PATIENCE_MS = 3000;
+const CODE_LETTERS = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 const DAY_NAMES = ['월', '화', '수', '목', '금', '토', '일'];
 
 // ---------------------------------------------------------------- state
@@ -40,6 +56,14 @@ const saved = {
     }
   },
 };
+
+function readJson(text, fallback) {
+  try {
+    return text ? JSON.parse(text) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 const inApp = /JellyCalendarApp/.test(navigator.userAgent);
 const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -63,9 +87,13 @@ const state = {
   view: saved.get('view') === 'box' ? 'box' : 'month',
   // Set by the Android app: { mode: 'shared' } or { mode: 'all', date, personal, doubleTap, longPress }.
   host: null,
-  sheet: null, // { kind: 'jelly' | 'new' | 'add' | 'invite' | 'menu' | 'name', ... }
+  sheet: null, // { kind: 'jelly' | 'new' | 'add' | 'invite' | 'menu' | 'name' | 'golden', ... }
   memos: [],
   online: navigator.onLine,
+  font: null,
+  // Jellies (box keys) that turned to gold here, and the grabs counted towards the next one.
+  goldenKeys: new Set(readJson(saved.get('golden.keys'), [])),
+  streak: { key: null, count: 0, at: 0 },
 };
 const subs = { space: null, members: null, jellies: null, jelly: null, memos: null };
 let ready = false;
@@ -233,6 +261,7 @@ async function boot() {
   const config = emulator
     ? { apiKey: 'demo-key', authDomain: 'localhost', projectId: 'demo-jelly', appId: 'demo-app' }
     : firebaseConfig;
+  applyFont(saved.get('font'));
   readHost();
   if (inApp) reportViewport();
   if (!config) {
@@ -309,12 +338,25 @@ function readHost() {
   if (next?.mode === 'all' && !/^\d{4}-\d{2}-\d{2}$/.test(next.date || '')) next = { ...next, mode: 'shared' };
   const changedMode = (state.host?.mode || 'shared') !== (next?.mode || 'shared');
   state.host = next;
+  if (next?.font) applyFont(next.font);
   // A sheet from one tab should not stay open over the other one.
   if (changedMode && state.sheet) closeSheet();
 }
 
 function isAll() {
   return state.host?.mode === 'all';
+}
+
+/** Letters headings and jellies in the chosen face ([id] from FONTS; anything else: the first). */
+function applyFont(id) {
+  const font = FONTS.find((f) => f.id === id) || FONTS[0];
+  if (state.font === font.id) return;
+  state.font = font.id;
+  const root = document.documentElement;
+  root.style.setProperty('--display', font.family);
+  root.style.setProperty('--display-weight', String(font.weight));
+  root.dataset.font = font.id;
+  setTitleFace(font.family, font.weight);
 }
 
 /** How the finishing gestures are set up in the app (both on in a browser). */
@@ -822,7 +864,7 @@ function useBoxView(kind, onAdd, onSwipe) {
   appEl().replaceChildren(top, note, frame);
   document.body.classList.add('fill');
   screen = kind;
-  const box = new JellyBox(inner, { onOpen: openItem, onToggle: toggleItem, onSwipe });
+  const box = new JellyBox(inner, { onOpen: openItem, onToggle: toggleItem, onSwipe, onGrab: grabItem });
   boxView = { kind, top, note, frame, box };
   if (testMode) window.__jellyBox = box;
   return boxView;
@@ -841,6 +883,7 @@ function sharedItem(j) {
     flavor: j.flavor,
     done: !!j.done,
     badge: { text: initial(realName(j.by, j.byName)), color: memberColor(j.by), ink: memberInk(j.by) },
+    gold: state.goldenKeys.has(`s:${j.id}`),
     ref: { kind: 'shared', id: j.id },
   };
 }
@@ -856,6 +899,89 @@ function personalItem(p) {
     badge: null,
     ref: { kind: 'personal', id: p.id },
   };
+}
+
+/** One more squeeze of [item] in the box: glitter from the 25th, gold on the 50th. */
+function grabItem(item) {
+  const box = boxView?.box;
+  const now = Date.now();
+  const st = state.streak;
+  st.count = st.key === item.key && now - st.at <= GOLDEN_PATIENCE_MS ? st.count + 1 : 1;
+  st.key = item.key;
+  st.at = now;
+  const level = st.count < GOLDEN_HINT ? 0 : Math.min(1, (st.count - GOLDEN_HINT + 1) / (GOLDEN_GRABS - GOLDEN_HINT));
+  box?.setGlitter(item.key, level);
+  if (st.count < GOLDEN_GRABS) return;
+  st.key = null;
+  st.count = 0;
+  box?.setGlitter(null, 0);
+  item.gold = true;
+  state.goldenKeys.add(item.key);
+  saved.set('golden.keys', JSON.stringify([...state.goldenKeys].slice(-30)));
+  box?.burst(item.key);
+  // Let it burst into gold before the news covers it.
+  setTimeout(() => foundGolden(item), 1200);
+}
+
+function foundGolden(item) {
+  if (bridge?.foundGolden) {
+    // Inside the app, the app keeps one code per phone and shows the news.
+    bridge.foundGolden(item.ref.kind === 'personal' ? item.ref.id : '');
+    return;
+  }
+  if (readJson(saved.get('golden.find'), null)) {
+    toast('✨ 또 황금 젤리! 황금 코드는 메뉴에서 다시 볼 수 있어요');
+    return;
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  const chars = Array.from(bytes, (b) => CODE_LETTERS[b % CODE_LETTERS.length]).join('');
+  saved.set('golden.find', JSON.stringify({ code: `GOLD-${chars.slice(0, 4)}-${chars.slice(4)}`, foundAt: Date.now() }));
+  openSheet({ kind: 'golden' });
+}
+
+function foundAtText(ms) {
+  const d = new Date(ms);
+  const hour = d.getHours();
+  const ampm = hour < 12 ? '오전' : '오후';
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${ampm} ${hour % 12 || 12}:${pad(d.getMinutes())}`;
+}
+
+/** The surprise, and later the code again from the menu. */
+function buildGoldenSheet() {
+  const find = readJson(saved.get('golden.find'), null);
+  if (!find) {
+    closeSheet();
+    return;
+  }
+  const when = foundAtText(find.foundAt);
+  const text = `🏆 젤리 캘린더에서 숨겨진 황금 젤리를 찾았어요!\n황금 코드: ${find.code}\n찾은 때: ${when}`;
+  sheetFrame(
+    h('div', { class: 'golden', 'data-testid': 'golden' },
+      h('div', { class: 'golden-jelly', 'aria-hidden': 'true' }, '🏆'),
+      h('div', { class: 'golden-title' }, '숨겨진 황금 젤리를', h('br'), '찾았어요!'),
+      h('p', { class: 'golden-sub' }, `젤리를 ${GOLDEN_GRABS}번이나 쉬지 않고 주물럭거린 끈기에 젤리가 황금으로 변했어요.`),
+      h('p', { class: 'golden-ask' }, `이 화면을 캡처해서 제작자 ${MAKER}에게 보내 주세요. 작은 선물을 드려요!`),
+      h('div', { class: 'golden-code' },
+        h('div', { class: 'golden-code-label' }, '황금 코드'),
+        h('div', { class: 'golden-code-value', 'data-testid': 'golden-code' }, find.code),
+        h('div', { class: 'golden-code-label' }, `찾은 때 · ${when}`)),
+      h('button', {
+        class: 'btn block golden-btn',
+        onClick: async () => {
+          try {
+            if (navigator.share) {
+              await navigator.share({ text });
+            } else {
+              await navigator.clipboard.writeText(text);
+              toast('황금 코드를 복사했어요. 제작자에게 붙여 넣어 보내 주세요');
+            }
+          } catch {
+            // Closed the share sheet: nothing to do.
+          }
+        },
+      }, '제작자에게 보내기'),
+      h('button', { class: 'btn ghost block', onClick: closeSheet }, '닫기')),
+  );
 }
 
 function openItem(item) {
@@ -984,6 +1110,7 @@ function buildSheet() {
   else if (s.kind === 'invite') buildInviteSheet();
   else if (s.kind === 'menu') buildMenuSheet();
   else if (s.kind === 'name') buildNameSheet();
+  else if (s.kind === 'golden') buildGoldenSheet();
 }
 
 function buildJellySheet() {
@@ -1399,8 +1526,31 @@ function buildMenuSheet() {
             },
           }, '달력 지우기 (모든 사람에게서)')
         : null),
+    inApp ? null : fontPicker(),
+    !inApp && saved.get('golden.find')
+      ? h('button', { class: 'btn ghost block golden-again', onClick: () => openReplace({ kind: 'golden' }) }, '🏆 황금 젤리 코드 보기')
+      : null,
     h('p', { class: 'privacy-note' }, PRIVACY_LINE),
   );
+}
+
+/** "글씨체": each choice written in its own face. Remembered on this phone only. */
+function fontPicker() {
+  const row = h('div', { class: 'font-row', 'data-testid': 'fonts' });
+  const paint = () => row.replaceChildren(...FONTS.map((f) => h('button', {
+    class: `chip font-chip${state.font === f.id ? ' on' : ''}`,
+    style: { fontFamily: f.family, fontWeight: String(f.weight) },
+    'aria-pressed': String(state.font === f.id),
+    onClick: () => {
+      applyFont(f.id);
+      saved.set('font', f.id);
+      paint();
+    },
+  }, f.name)));
+  paint();
+  return h('div', { class: 'font-picker' },
+    h('div', { class: 'day-title', style: { margin: '18px 0 8px' } }, '글씨체'),
+    row);
 }
 
 function openReplace(sheet) {

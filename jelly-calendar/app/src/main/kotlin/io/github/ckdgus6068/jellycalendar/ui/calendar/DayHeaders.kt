@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
+import io.github.ckdgus6068.jellycalendar.core.KoreanHolidays
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.ui.dayName
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
@@ -50,9 +51,10 @@ import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-internal fun dayColor(date: LocalDate, colors: JellyColors): Color = when (date.dayOfWeek) {
-    DayOfWeek.SATURDAY -> colors.saturday
-    DayOfWeek.SUNDAY -> colors.sunday
+/** Red for Sundays and public holidays, blue for Saturdays. */
+internal fun dayColor(date: LocalDate, colors: JellyColors): Color = when {
+    date.dayOfWeek == DayOfWeek.SUNDAY || KoreanHolidays.on(date) != null -> colors.sunday
+    date.dayOfWeek == DayOfWeek.SATURDAY -> colors.saturday
     else -> colors.text
 }
 
@@ -69,7 +71,7 @@ private fun progressOf(data: AppData, date: LocalDate): DayProgress {
 
 /** Remembers where a day sits on screen so jellies can be dropped onto it. */
 @Composable
-private fun Modifier.dayDropTarget(date: LocalDate, drag: DragController): Modifier {
+internal fun Modifier.dayDropTarget(date: LocalDate, drag: DragController): Modifier {
     DisposableEffect(date, drag) {
         onDispose { drag.dayRects.remove(date) }
     }

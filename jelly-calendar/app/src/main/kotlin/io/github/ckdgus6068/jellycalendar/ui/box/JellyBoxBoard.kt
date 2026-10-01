@@ -1,5 +1,8 @@
 package io.github.ckdgus6068.jellycalendar.ui.box
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,6 +34,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -58,7 +62,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.ckdgus6068.jellycalendar.core.GOLDEN_FLAVOR
+import io.github.ckdgus6068.jellycalendar.core.GOLDEN_GRABS
+import io.github.ckdgus6068.jellycalendar.core.GOLDEN_HINT
+import io.github.ckdgus6068.jellycalendar.core.GrabStreak
 import io.github.ckdgus6068.jellycalendar.core.Jelly
+import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragSource
 import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
@@ -81,7 +90,11 @@ private val BOX_COLORS = listOf(
     Color(0xFF43B4FF), Color(0xFF3F6BF2), Color(0xFFB05CFF), Color(0xFFD8F55A), Color(0xFFF03C5A),
 )
 
-fun boxColor(flavor: Int): Color = BOX_COLORS[Math.floorMod(flavor, BOX_COLORS.size)]
+private val GOLD = Color(0xFFFFC52A)
+private val GOLD_SHEEN = listOf(Color(0xFFFFF3B0), Color(0xFFFFC52A), Color(0xFFE09A00))
+
+fun boxColor(flavor: Int): Color =
+    if (flavor == GOLDEN_FLAVOR) GOLD else BOX_COLORS[Math.floorMod(flavor, BOX_COLORS.size)]
 
 private val INK = Color(0xFF1A1320)
 
@@ -122,6 +135,8 @@ fun JellyBoxBoard(
     onToggleDone: (Jelly) -> Unit,
     onSwipe: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /** The same jelly was grabbed and let go [GOLDEN_GRABS] times in a row (GoldenJelly.kt). */
+    onGolden: (Jelly) -> Unit = {},
 ) {
     val world = remember { SoftBodyWorld() }
     var frame by remember { mutableIntStateOf(0) }
@@ -135,6 +150,18 @@ fun JellyBoxBoard(
     val open by rememberUpdatedState(onOpen)
     val toggle by rememberUpdatedState(onToggleDone)
     val swipe by rememberUpdatedState(onSwipe)
+    val golden by rememberUpdatedState(onGolden)
+    val streak = remember { GrabStreak() }
+    var streakTick by remember { mutableIntStateOf(0) }
+    // The flash when a jelly turns to gold: which one, and how far along (0 to 1).
+    var burstId by remember { mutableStateOf<String?>(null) }
+    val burst = remember { Animatable(1f) }
+    LaunchedEffect(burstId) {
+        if (burstId == null) return@LaunchedEffect
+        burst.snapTo(0f)
+        burst.animateTo(1f, tween(durationMillis = 1100, easing = LinearOutSlowInEasing))
+        burstId = null
+    }
     val doubleTap by rememberUpdatedState(doneByDoubleTap)
     val longPress by rememberUpdatedState(doneByLongPress)
     var origin by remember { mutableStateOf(Offset.Zero) }
@@ -169,18 +196,39 @@ fun JellyBoxBoard(
             val h = constraints.maxHeight.toFloat()
             val pad = with(density) { 3.dp.toPx() }
 
-            // Keep the world in step with the day's jellies.
-            val ordered = jellies.sortedBy { it.startMin ?: 0 }
-            val totalArea = w * h
+            // Keep the world in step with the day's jellies. Pinned ones ("젤위로") hang in a row at
+            // the top; the others fall in behind them and share the room below.
+            val pinned = jellies.filter { it.pinned }.sortedBy { it.startMin ?: 0 }.take(Planner.MAX_PINNED)
+            val pinnedIds = pinned.map { it.id }.toSet()
+            val ordered = jellies.filter { it.id !in pinnedIds }.sortedBy { it.startMin ?: 0 }
+            val gap = with(density) { 6.dp.toPx() }
+            val pinDiameter = if (pinned.isEmpty()) 0f else minOf(w / pinned.size * 0.8f, h * 0.24f, w * 0.42f)
+            val pinBottom = if (pinned.isEmpty()) 0f else pad + gap + pinDiameter + gap
+            val totalArea = w * (h - pinBottom)
             val wanted = ordered.associate { it.id to max(it.durationMin, 10) / 540f * 0.8f * totalArea }
             val sum = wanted.values.sum()
             val scale = if (sum > 0.82f * totalArea) 0.82f * totalArea / sum else 1f
             LaunchedEffect(w, h) { world.resize(w, h, pad) }
-            LaunchedEffect(ordered.map { it.id to it.durationMin }, w, h) {
+            LaunchedEffect(jellies.map { Triple(it.id, it.durationMin, it.id in pinnedIds) }, w, h) {
                 world.resize(w, h, pad)
-                val ids = ordered.map { it.id }.toSet()
-                world.blobs.keys.filter { it !in ids }.forEach { world.remove(it) }
+                world.pinnedBottom = pinBottom
+                val ids = jellies.map { it.id }.toSet()
+                // Gone, or pinned or let go since: laid down again.
+                world.blobs.values.filter { it.id !in ids || it.fixed != (it.id in pinnedIds) }.map { it.id }.forEach { world.remove(it) }
                 labels.keys.retainAll(ids)
+                pinned.forEachIndexed { index, jelly ->
+                    val cx = w * (index + 0.5f) / pinned.size
+                    val cy = pad + gap + pinDiameter / 2f
+                    val area = PI.toFloat() * pinDiameter * pinDiameter / 4f
+                    val blob = world.blobs[jelly.id]
+                    if (blob == null) {
+                        world.add(jelly.id, area, cx, cy, fixed = true)
+                    } else {
+                        if (abs(blob.targetArea - area) > 1f) blob.resize(area)
+                        blob.placeAt(cx, cy)
+                        world.wake()
+                    }
+                }
                 var spawnY = -40f
                 ordered.forEachIndexed { index, jelly ->
                     val area = (wanted[jelly.id] ?: 0f) * scale
@@ -282,6 +330,18 @@ fun JellyBoxBoard(
                             // leaves the box, the calendar-wide drag takes over and floats the jelly over
                             // the screen, so it can be dropped on a day above or into the tray below.
                             val jelly = current.find { it.id == id } ?: return@awaitEachGesture
+                            if (blob.fixed) {
+                                // A pinned jelly stays put: holding it and letting go still finishes it.
+                                if (held && longPress) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    val up = waitForUpOrCancellation()
+                                    if (up != null) {
+                                        up.consume()
+                                        toggle(jelly)
+                                    }
+                                }
+                                return@awaitEachGesture
+                            }
                             if (held) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             val start = movedTo ?: down.position
                             world.grab(blob, start.x, start.y)
@@ -299,6 +359,19 @@ fun JellyBoxBoard(
                                         } else if (!dragging && longPress) {
                                             world.blobs[id]?.kick(0.12f)
                                             toggle(jelly)
+                                        } else if (dragging) {
+                                            // Squeezed and let go inside the box: one step towards gold.
+                                            val count = streak.grabbed(id, change.uptimeMillis)
+                                            streakTick++
+                                            if (count >= GOLDEN_GRABS) {
+                                                streak.reset()
+                                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                world.blobs[id]?.kick(0.35f)
+                                                burstId = id
+                                                golden(jelly)
+                                            } else if (count >= GOLDEN_HINT) {
+                                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
                                         }
                                         break
                                     }
@@ -334,9 +407,10 @@ fun JellyBoxBoard(
                         }
                     },
             ) {
-                if (frame < 0) return@Canvas
+                if (frame < 0 || streakTick < 0) return@Canvas
                 val path = Path()
-                for (blob in world.blobs.values) {
+                // Pinned jellies are drawn last, on top of the ones falling in behind them.
+                for (blob in world.blobs.values.sortedBy { it.fixed }) {
                     val jelly = current.find { it.id == blob.id } ?: continue
                     blobPath(blob, path)
                     val base = boxColor(jelly.flavor)
@@ -345,6 +419,15 @@ fun JellyBoxBoard(
                     val away = drag.isGhost(jelly.id) || drag.isHidden(jelly.id)
                     drawPath(path, if (away) color.copy(alpha = 0.25f) else color)
                     if (away) continue
+                    val gold = jelly.flavor == GOLDEN_FLAVOR
+                    val glitter = streak.glitter(jelly.id)
+                    if (gold || glitter > 0f) blob.updateBounds()
+                    if (gold && !jelly.isDone) {
+                        drawPath(
+                            path,
+                            Brush.linearGradient(GOLD_SHEEN, Offset(blob.minX, blob.minY), Offset(blob.maxX, blob.maxY)),
+                        )
+                    }
                     if (jelly.isDone) drawPath(path, Color.White.copy(alpha = 0.85f), style = Stroke(width = 2.5.dp.toPx()))
                     if (blob.id == world.grabId) drawPath(path, Color.White, style = Stroke(width = 3.dp.toPx()))
 
@@ -358,6 +441,13 @@ fun JellyBoxBoard(
                     val label = labels[jelly.id]?.takeIf { it.key == key }
                         ?: layoutLabel(measurer, key, type, this).also { labels[jelly.id] = it }
                     drawLabel(label, blob.centroidX(), blob.centroidY())
+                    if (gold) drawSparkles(blob, 1f, frame, 4)
+                    if (glitter > 0f) drawSparkles(blob, glitter, frame, 2 + (glitter * 4).roundToInt())
+                    if (burstId == blob.id) drawBurst(Offset(blob.centroidX(), blob.centroidY()), blob, burst.value)
+                    if (blob.fixed) {
+                        blob.updateBounds()
+                        drawPin(Offset(blob.centroidX(), blob.minY), 9.dp.toPx())
+                    }
                 }
             }
 
@@ -465,6 +555,54 @@ private fun DrawScope.drawLabel(label: BlobLabel, cx: Float, cy: Float) {
     drawText(label.title, topLeft = Offset(cx - label.title.size.width / 2f, y))
     y += label.title.size.height
     label.sub?.let { drawText(it, topLeft = Offset(cx - it.size.width / 2f, y)) }
+}
+
+/** Little four-pointed stars twinkling around a jelly: [strength] from 0 (none) to 1. */
+private fun DrawScope.drawSparkles(blob: SoftBlob, strength: Float, frame: Int, count: Int) {
+    val w = blob.maxX - blob.minX
+    val h = blob.maxY - blob.minY
+    for (i in 0 until count) {
+        // Fixed spots on the jelly's edge, each twinkling at its own pace.
+        val angle = i * 2.39996f + 0.6f
+        val x = blob.centroidX() + kotlin.math.cos(angle) * w * 0.42f
+        val y = blob.centroidY() + kotlin.math.sin(angle) * h * 0.42f
+        val twinkle = 0.55f + 0.45f * kotlin.math.sin(frame * 0.12f + i * 1.7f)
+        val r = (3.5f + 3f * twinkle) * density * (0.6f + 0.4f * strength)
+        drawStar(Offset(x, y), r, Color.White.copy(alpha = (0.35f + 0.65f * twinkle) * strength))
+    }
+}
+
+/** Gold dust flying out when a jelly turns to gold; [t] runs from 0 to 1. */
+private fun DrawScope.drawBurst(center: Offset, blob: SoftBlob, t: Float) {
+    val reach = maxOf(blob.maxX - blob.minX, blob.maxY - blob.minY) * (0.4f + 0.9f * t)
+    val fade = 1f - t
+    drawCircle(Color(0xFFFFF3B0).copy(alpha = 0.45f * fade), radius = reach * 0.7f, center = center)
+    for (i in 0 until 14) {
+        val angle = i * (2f * PI.toFloat() / 14f) + 0.2f
+        val p = Offset(center.x + kotlin.math.cos(angle) * reach, center.y + kotlin.math.sin(angle) * reach)
+        drawStar(p, (5f + 4f * fade) * density, (if (i % 2 == 0) GOLD else Color.White).copy(alpha = fade))
+    }
+}
+
+private fun DrawScope.drawStar(c: Offset, r: Float, color: Color) {
+    val star = Path().apply {
+        moveTo(c.x, c.y - r)
+        quadraticBezierTo(c.x, c.y, c.x + r, c.y)
+        quadraticBezierTo(c.x, c.y, c.x, c.y + r)
+        quadraticBezierTo(c.x, c.y, c.x - r, c.y)
+        quadraticBezierTo(c.x, c.y, c.x, c.y - r)
+        close()
+    }
+    drawPath(star, color)
+}
+
+/** A little push pin stuck into the top of a pinned jelly. */
+private fun DrawScope.drawPin(tip: Offset, size: Float) {
+    val head = Offset(tip.x, tip.y - size * 0.15f)
+    drawLine(Color(0xFFB9B4C2), start = head, end = Offset(tip.x, tip.y + size * 0.9f), strokeWidth = size * 0.22f, cap = StrokeCap.Round)
+    drawCircle(Color.White, radius = size * 0.72f, center = head)
+    drawCircle(Color(0xFFFF3D6E), radius = size * 0.56f, center = head)
+    drawCircle(Color.White.copy(alpha = 0.7f), radius = size * 0.18f, center = Offset(head.x - size * 0.2f, head.y - size * 0.2f))
 }
 
 private fun DrawScope.drawCheck(center: Offset, size: Float) {

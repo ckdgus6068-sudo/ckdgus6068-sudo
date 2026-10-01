@@ -89,6 +89,7 @@ class PinsSlotsHolidaysTest {
         assertEquals("노동절", KoreanHolidays.on(LocalDate.of(2026, 5, 1))?.name)
         assertEquals("제헌절", KoreanHolidays.on(LocalDate.of(2026, 7, 17))?.name)
         assertEquals("성탄절", KoreanHolidays.on(LocalDate.of(2026, 12, 25))?.short)
+        assertEquals("대체휴일", KoreanHolidays.on(LocalDate.of(2026, 10, 5))?.short)
         assertNull(KoreanHolidays.on(LocalDate.of(2026, 10, 7)))
     }
 }

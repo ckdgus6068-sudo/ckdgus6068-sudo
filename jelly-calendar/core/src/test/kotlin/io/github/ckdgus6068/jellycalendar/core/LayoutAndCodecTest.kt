@@ -80,21 +80,30 @@ class LayoutAndCodecTest {
         assertTrue(settings.hintDismissed)
         assertFalse(settings.boxHintDismissed)
         assertFalse(settings.guideSeen)
-        assertEquals(FontChoice.ROUND, settings.font)
+        assertEquals(FontChoice.NANUM_ROUND, settings.font)
     }
 
     @Test
     fun unknownFontFallsBackToDefault() {
         val text = """{"settings":{"font":"COMIC","guideSeen":true}}"""
         val settings = JellyCodec.decode(text).settings
-        assertEquals(FontChoice.ROUND, settings.font)
+        assertEquals(FontChoice.NANUM_ROUND, settings.font)
         assertTrue(settings.guideSeen)
     }
 
     @Test
     fun fontChoiceRoundTrips() {
-        val data = AppData(settings = Settings(font = FontChoice.CLEAN, guideSeen = true, boxHintDismissed = true))
-        assertEquals(data, JellyCodec.decode(JellyCodec.encode(data)))
+        for (font in FontChoice.entries) {
+            val data = AppData(settings = Settings(font = font, guideSeen = true, boxHintDismissed = true))
+            assertEquals(data, JellyCodec.decode(JellyCodec.encode(data)))
+        }
+    }
+
+    @Test
+    fun earlierFontPicksAreKept() {
+        // The fat round face is no longer the default, but a save that names it keeps it.
+        val text = """{"settings":{"font":"ROUND"}}"""
+        assertEquals(FontChoice.ROUND, JellyCodec.decode(text).settings.font)
     }
 
     @Test

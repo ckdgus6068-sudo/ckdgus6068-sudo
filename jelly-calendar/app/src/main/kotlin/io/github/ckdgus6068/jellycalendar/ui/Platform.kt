@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.ckdgus6068.jellycalendar.core.FontChoice
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
@@ -22,8 +23,17 @@ interface JellyPlatform {
      */
     fun setWakeAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean, dismissMinutes: List<Int>): Boolean
 
+    /**
+     * Asks the clock app for a plain one-time alarm, e.g. a little before a jelly starts. It rings
+     * at the next [hour]:[minute] (24-hour clock). Returns false when no clock app accepted it.
+     */
+    fun setAlarm(hour: Int, minute: Int, label: String, skipUi: Boolean): Boolean = false
+
     /** Opens the clock app's alarm list. */
     fun openAlarmList(): Boolean
+
+    /** Offers [text] to the phone's share sheet (KakaoTalk, messages, …) under [title]. */
+    fun shareText(text: String, title: String): Boolean = false
 
     /** Lets the user save [json] as a file. */
     fun exportBackup(fileName: String, json: String)
@@ -64,10 +74,13 @@ class SharedHost(
     /** False: the shared calendar. True: everything on [date] in one box ("모두"). */
     val all: Boolean,
     val date: LocalDate,
-    /** The phone's own jellies on [date]; only handed to the page when [all]. */
+    /** The phone's own jellies of the six weeks around [date]; only handed to the page when [all]. */
     val personal: List<Jelly>,
     val doneByDoubleTap: Boolean,
     val doneByLongPress: Boolean,
+    val weekStartsOnSunday: Boolean,
+    /** The lettering picked in settings, so the page matches the rest of the app. */
+    val font: FontChoice,
     val actions: SharedHostActions,
 )
 
@@ -77,5 +90,6 @@ interface SharedHostActions {
     fun togglePersonal(id: String)
     fun createPersonal(date: LocalDate)
     fun shiftDay(direction: Int)
+    fun showDay(date: LocalDate)
     fun showShared()
 }

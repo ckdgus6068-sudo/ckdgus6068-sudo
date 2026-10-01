@@ -16,6 +16,7 @@ const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
@@ -243,6 +244,37 @@ try {
   const sheet = await b.locator('.sheet').boundingBox();
   check(sheet.height > 250, `iphone: the menu sheet opens at full height (${Math.round(sheet.height)}px)`);
   await shot(b, '10-iphone-menu');
+
+  // The lettering can be picked in a browser; it is remembered on the phone.
+  const display = (page) => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--display'));
+  check((await display(b)).includes('NanumSquareRound'), 'iphone: rounded lettering by default');
+  await tid(b, 'fonts').getByText('말랑', { exact: true }).click();
+  check((await display(b)).includes('Jua') && (await b.evaluate(() => localStorage.getItem('jellyShare.font'))) === 'JUA',
+    'iphone: picks another lettering and keeps it');
+  await tid(b, 'fonts').getByText('동글', { exact: true }).click();
+  await b.goBack();
+
+  // The hidden golden jelly: grab the same jelly 50 times in a row.
+  const grab = async (page, title, times, at) => {
+    for (let i = 0; i < times; i++) {
+      const c = (await box(page)).find((x) => x.title === title);
+      await page.mouse.move(c.x, c.y);
+      await page.mouse.down();
+      await page.mouse.move(c.x + (i % 2 ? -24 : 24), c.y, { steps: 3 });
+      await page.mouse.up();
+      if (at && i + 1 === at.after) await at.then();
+    }
+  };
+  const lone = (await box(b))[0].title;
+  await grab(b, lone, 50, {
+    after: 30,
+    then: async () => check(await b.evaluate(() => window.__jellyBox.glitter.level > 0), 'iphone: the jelly glitters after 30 grabs'),
+  });
+  await tid(b, 'golden').waitFor({ timeout: 5000 });
+  const golden = await tid(b, 'golden-code').textContent();
+  check(/^GOLD-[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/.test(golden), `iphone: golden jelly found (${golden})`);
+  check(await b.evaluate(() => [...window.__jellyBox.byKey.values()].some((it) => it.gold)), 'iphone: the jelly turned to gold');
+  await shot(b, '10b-iphone-golden');
   await b.goBack();
 
   // 8. Inside the app's "모두" tab: the phone's own jellies and the shared ones in one box.
@@ -272,6 +304,7 @@ try {
       createPersonal: call('createPersonal'),
       shiftDay: call('shiftDay'),
       showShared: call('showShared'),
+      foundGolden: call('foundGolden'),
     };
   }, `${month}-17`);
   const called = (page, name, arg) => page.waitForFunction(
@@ -299,6 +332,19 @@ try {
   await app.mouse.dblclick(report.x, report.y);
   await called(app, 'togglePersonal', 'p2');
   check(true, 'all: a double tap on my own jelly finishes it in the app');
+
+  // Inside the app the app keeps the golden code: the page hands the find over.
+  await settled(app, 4);
+  await grab(app, '헬스', 50);
+  await called(app, 'foundGolden', 'p1');
+  check(!(await tid(app, 'golden').count()), 'all: a golden find inside the app is the app\'s to announce');
+
+  // The page letters itself the way the app's settings say.
+  await app.evaluate(() => {
+    window.__host = { ...window.__host, font: 'ROUND' };
+    window.jellyHost.poke();
+  });
+  check((await display(app)).includes('Bagel'), 'all: follows the lettering picked in the app');
 
   await settled(app, 4);
   blobs = await box(app);

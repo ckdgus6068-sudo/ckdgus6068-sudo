@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
+import io.github.ckdgus6068.jellycalendar.core.KoreanHolidays
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
 import io.github.ckdgus6068.jellycalendar.ui.box.JellyBoxBoard
@@ -64,7 +66,7 @@ import java.time.LocalDateTime
 enum class Space { MINE, SHARED, ALL }
 
 /** How the phone's own jellies are shown. */
-enum class ViewMode { BOX, WEEK, DAY }
+enum class ViewMode { BOX, WEEK, DAY, MONTH }
 
 /** Everything the calendar screen asks its owner to do. */
 interface CalendarActions {
@@ -84,6 +86,9 @@ interface CalendarActions {
     fun openSettings()
     fun openGuide()
     fun dismissHint(mode: ViewMode)
+
+    /** A jelly in the box was squeezed into gold (GoldenJelly.kt). */
+    fun foundGolden(jelly: Jelly)
 }
 
 @Composable
@@ -106,39 +111,29 @@ fun CalendarScreen(
     val weekDays = remember(weekStart) { Planner.weekDays(weekStart) }
     val compact = mode == ViewMode.WEEK
 
-    // The shared calendar is a web page, the same one the other person opens on an iPhone. In "모두"
-    // the page shows the selected day as one box, with the phone's own jellies handed over to it.
+    // The shared calendar is a web page, the same one the other person opens on an iPhone; in "모두"
+    // it also gets the phone's own jellies. It draws the same date bar and bottom bar as here.
     Column(modifier.fillMaxSize()) {
         // One place for the tabs, so the jelly behind them slides from tab to tab.
         SpaceTabs(space, actions)
         if (space != Space.MINE) {
-            if (space == Space.ALL) {
-                TopBar(
-                    title = dateTitle(selected),
-                    subtitle = when (selected) {
-                        today -> "오늘"
-                        today.plusDays(1) -> "내일"
-                        else -> null
-                    },
-                    actions = actions,
-                )
-            }
             // The page has its own text fields (memos), so it makes room for the keyboard itself.
             sharedSpace(Modifier.weight(1f).fillMaxWidth().imePadding())
         } else {
-            TopBar(
-                title = if (compact) weekTitle(weekStart) else dateTitle(selected),
-                subtitle = when {
-                    compact && today in weekDays -> "이번 주"
-                    !compact && selected == today -> "오늘"
-                    !compact && selected == today.plusDays(1) -> "내일"
-                    else -> null
+            DateBar(
+                title = when (mode) {
+                    ViewMode.WEEK -> weekTitle(weekStart)
+                    ViewMode.MONTH -> "${selected.year}년 ${selected.monthValue}월"
+                    else -> dateTitle(selected)
+                },
+                subtitle = when (mode) {
+                    ViewMode.WEEK -> if (today in weekDays) "이번 주" else null
+                    ViewMode.MONTH -> if (selected.year == today.year && selected.monthValue == today.monthValue) "이번 달" else null
+                    else -> listOfNotNull(relativeDay(selected, today), KoreanHolidays.on(selected)?.name).joinToString(" · ").ifEmpty { null }
                 },
                 actions = actions,
-            ) {
-                ModeToggle(mode) { actions.changeMode(it) }
-            }
-            if (compact) {
+            )
+            if (mode == ViewMode.WEEK) {
                 WeekHeader(
                     days = weekDays,
                     data = data,
@@ -150,7 +145,7 @@ fun CalendarScreen(
                         actions.changeMode(ViewMode.DAY)
                     },
                 )
-            } else {
+            } else if (mode != ViewMode.MONTH) {
                 DayStrip(
                     days = weekDays,
                     selected = selected,
@@ -182,10 +177,8 @@ fun CalendarScreen(
                 )
             }
             Box(Modifier.weight(1f).padding(top = 6.dp)) {
-                val scroll = if (compact) weekScroll else dayScroll
-                val days = if (compact) weekDays else listOf(selected)
-                if (mode == ViewMode.BOX) {
-                    JellyBoxBoard(
+                when (mode) {
+                    ViewMode.BOX -> JellyBoxBoard(
                         date = selected,
                         jellies = Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED },
                         drag = drag,
@@ -195,34 +188,40 @@ fun CalendarScreen(
                         onToggleDone = { actions.toggleDone(it) },
                         onSwipe = { actions.shift(it) },
                         modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
+                        onGolden = { actions.foundGolden(it) },
                     )
-                } else {
-                InitialScroll(scroll, data, days, today, nowMinute, compact)
-                TimelineGrid(
-                    days = days,
-                    data = data,
-                    today = today,
-                    nowMinute = nowMinute,
-                    compact = compact,
-                    scrollState = scroll,
-                    drag = drag,
-                    onOpen = { actions.open(it) },
-                    onToggleDone = { actions.toggleDone(it) },
-                    onResize = { jelly, duration -> actions.resize(jelly, duration) },
-                    onCreateAt = { date, start -> actions.create(date, start) },
-                    onSwipe = { actions.shift(it) },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                    ViewMode.MONTH -> MonthView(
+                        data = data,
+                        selected = selected,
+                        today = today,
+                        drag = drag,
+                        onPick = { actions.select(it) },
+                        onOpen = { actions.open(it) },
+                        onToggleDone = { actions.toggleDone(it) },
+                        onSwipe = { actions.shift(it) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    else -> {
+                        val scroll = if (compact) weekScroll else dayScroll
+                        val days = if (compact) weekDays else listOf(selected)
+                        InitialScroll(scroll, data, days, today, nowMinute, compact)
+                        TimelineGrid(
+                            days = days,
+                            data = data,
+                            today = today,
+                            nowMinute = nowMinute,
+                            compact = compact,
+                            scrollState = scroll,
+                            drag = drag,
+                            onOpen = { actions.open(it) },
+                            onToggleDone = { actions.toggleDone(it) },
+                            onResize = { jelly, duration -> actions.resize(jelly, duration) },
+                            onCreateAt = { date, start -> actions.create(date, start) },
+                            onSwipe = { actions.shift(it) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
-                JellyFab(
-                    onClick = { actions.create(if (compact && today in weekDays) today else selected, null) },
-                    // In the box the jellies pile up at the bottom, so the button waits in the empty top corner.
-                    modifier = if (mode == ViewMode.BOX) {
-                        Modifier.align(Alignment.TopEnd).padding(top = 20.dp, end = 22.dp)
-                    } else {
-                        Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 14.dp)
-                    },
-                )
             }
             JellyTray(
                 items = Planner.tray(data),
@@ -233,7 +232,33 @@ fun CalendarScreen(
                 onToggleDone = { actions.toggleDone(it) },
                 onAdd = { actions.create(null, null) },
             )
+            BottomBar(
+                today = today,
+                showingToday = when (mode) {
+                    ViewMode.WEEK -> today in weekDays
+                    ViewMode.MONTH -> selected.year == today.year && selected.monthValue == today.monthValue
+                    else -> selected == today
+                },
+                onToday = { actions.goToday() },
+                onAdd = { actions.create(if (compact && today in weekDays) today else selected, null) },
+            ) {
+                ModeToggle(mode) { actions.changeMode(it) }
+            }
         }
+    }
+}
+
+/** "오늘", "내일", "3일 뒤", "어제"... for the date bar. */
+internal fun relativeDay(date: LocalDate, today: LocalDate): String? {
+    val days = java.time.temporal.ChronoUnit.DAYS.between(today, date)
+    return when {
+        days == 0L -> "오늘"
+        days == 1L -> "내일"
+        days == 2L -> "모레"
+        days == -1L -> "어제"
+        days in 3L..30L -> "${days}일 뒤"
+        days in -30L..-2L -> "${-days}일 전"
+        else -> null
     }
 }
 
@@ -262,18 +287,17 @@ private fun InitialScroll(
     }
 }
 
-/** The day (or week) with arrows to the ones before and after; a tap on it goes back to today. */
+/** The day, week or month on screen, with arrows to the ones before and after. */
 @Composable
-private fun TopBar(
+private fun DateBar(
     title: String,
     subtitle: String?,
     actions: CalendarActions,
-    trailing: @Composable () -> Unit = {},
 ) {
     val colors = LocalJellyColors.current
     val type = LocalJellyType.current
     Row(
-        Modifier.fillMaxWidth().height(52.dp).padding(start = 2.dp, end = 10.dp),
+        Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = { actions.shift(-1) }) {
@@ -284,22 +308,102 @@ private fun TopBar(
             Modifier
                 .weight(1f)
                 .clickableNoRipple { actions.goToday() },
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             FitText(
                 title,
                 color = colors.text,
-                maxSize = 17.sp,
+                maxSize = 18.sp,
                 minSize = 12.sp,
                 fontFamily = type.display,
                 fontWeight = type.displayWeight,
             )
-            Text(subtitle ?: "눌러서 오늘로", color = if (subtitle != null) colors.accent else colors.textSub, fontSize = 11.sp)
+            if (subtitle != null) Text(subtitle, color = colors.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
         IconButton(onClick = { actions.shift(1) }) {
             @Suppress("DEPRECATION")
             Icon(Icons.Filled.KeyboardArrowRight, contentDescription = "다음", tint = colors.text)
         }
-        trailing()
+    }
+}
+
+/**
+ * The same bar at the bottom of every screen: back to today on the left, the view switch in the
+ * middle and a new jelly on the right. The shared page draws its own copy of it.
+ */
+@Composable
+private fun BottomBar(
+    today: LocalDate,
+    showingToday: Boolean,
+    onToday: () -> Unit,
+    onAdd: () -> Unit,
+    toggle: @Composable () -> Unit,
+) {
+    val colors = LocalJellyColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+            .background(colors.surface)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TodayButton(today, highlighted = !showingToday, onClick = onToday)
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { toggle() }
+        AddButton(onAdd)
+    }
+}
+
+/** A little calendar leaf with today's date on it, and the word 오늘. */
+@Composable
+private fun TodayButton(today: LocalDate, highlighted: Boolean, onClick: () -> Unit) {
+    val colors = LocalJellyColors.current
+    Row(
+        Modifier
+            .height(40.dp)
+            .squishyClick(onClick = onClick)
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (highlighted) colors.accent.copy(alpha = 0.16f) else colors.surfaceSoft)
+            .padding(start = 8.dp, end = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier
+                .size(width = 22.dp, height = 24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(colors.surface)
+                .border(1.dp, colors.gridLineStrong, RoundedCornerShape(6.dp)),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.fillMaxWidth().height(6.dp).background(colors.accent))
+            Text("${today.dayOfMonth}", color = colors.text, fontSize = 11.sp, fontWeight = FontWeight.Bold, lineHeight = 14.sp)
+        }
+        Text(
+            "오늘",
+            color = if (highlighted) colors.accent else colors.text,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 6.dp),
+        )
+    }
+}
+
+@Composable
+private fun AddButton(onClick: () -> Unit) {
+    val flavor = JellyFlavors[0]
+    JellyBody(
+        flavor = flavor,
+        modifier = Modifier.size(48.dp).squishyClick(onClick = onClick),
+        cornerRadius = 18.dp,
+    ) {
+        Text(
+            "+",
+            color = flavor.ink,
+            fontSize = 26.sp,
+            fontFamily = LocalJellyType.current.display,
+            fontWeight = LocalJellyType.current.displayWeight,
+            modifier = Modifier.align(Alignment.Center),
+        )
     }
 }
 
@@ -391,7 +495,7 @@ private fun SpaceTabs(space: Space, actions: CalendarActions) {
     }
 }
 
-/** "상자 | 주 | 일" switch for the phone's own jellies, with a jelly that slides between them. */
+/** "상자 | 주 | 일 | 달" switch for the phone's own jellies, with a jelly that slides between them. */
 @Composable
 private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     val colors = LocalJellyColors.current
@@ -402,8 +506,8 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
     )
     BoxWithConstraints(
         Modifier
-            .width(132.dp)
-            .height(34.dp)
+            .width(168.dp)
+            .height(36.dp)
             .clip(RoundedCornerShape(17.dp))
             .background(colors.surfaceSoft),
     ) {
@@ -431,6 +535,7 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
                             ViewMode.BOX -> "상자"
                             ViewMode.WEEK -> "주"
                             ViewMode.DAY -> "일"
+                            ViewMode.MONTH -> "달"
                         },
                         color = if (option == mode) JellyFlavors[0].ink else colors.textSub,
                         fontSize = 14.sp,
@@ -439,25 +544,6 @@ private fun ModeToggle(mode: ViewMode, onChange: (ViewMode) -> Unit) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun JellyFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val flavor = JellyFlavors[0]
-    JellyBody(
-        flavor = flavor,
-        modifier = modifier.size(58.dp).squishyClick(onClick = onClick),
-        cornerRadius = 22.dp,
-    ) {
-        Text(
-            "+",
-            color = flavor.ink,
-            fontSize = 30.sp,
-            fontFamily = LocalJellyType.current.display,
-            fontWeight = LocalJellyType.current.displayWeight,
-            modifier = Modifier.align(Alignment.Center),
-        )
     }
 }
 
@@ -474,6 +560,11 @@ internal fun hintText(mode: ViewMode, doubleTapDone: Boolean, longPressDone: Boo
         parts += "끌기: 흔들기"
         parts += "위 날짜나 아래 보관함에 놓기: 옮기기"
         parts += "빈 곳을 옆으로 밀기: 다른 날"
+    } else if (mode == ViewMode.MONTH) {
+        parts.clear()
+        parts += "날짜 톡: 그날 젤리 보기"
+        parts += "보관함 젤리를 날짜에 놓기: 그날로 옮기기"
+        parts += "옆으로 밀기: 다른 달"
     } else {
         parts += "꾹 눌러 끌기: 옮기기"
         parts += "아래 손잡이: 길이"

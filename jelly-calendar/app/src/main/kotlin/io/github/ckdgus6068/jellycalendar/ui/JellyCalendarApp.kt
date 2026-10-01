@@ -49,6 +49,7 @@ import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
 import io.github.ckdgus6068.jellycalendar.ui.editor.EditorKind
 import io.github.ckdgus6068.jellycalendar.ui.editor.EditorState
 import io.github.ckdgus6068.jellycalendar.ui.editor.JellyForm
+import io.github.ckdgus6068.jellycalendar.ui.egg.GoldenDialog
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalIdleWobble
 import io.github.ckdgus6068.jellycalendar.ui.jelly.LocalJellyClock
 import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyClock
@@ -90,6 +91,9 @@ fun JellyCalendarApp(
 ) {
     val data by store.data.collectAsState()
     val nextAlarm by store.nextAlarm.collectAsState()
+    val goldenNews by store.goldenNews.collectAsState()
+    var showGolden by remember { mutableStateOf(false) }
+    var celebrate by remember { mutableStateOf(false) }
     val now by produceState(store.now()) {
         while (true) {
             val current = store.now()
@@ -130,6 +134,13 @@ fun JellyCalendarApp(
         // Start the sample tomorrow when this morning's run is already over.
         store.seedIfNeeded { day, id -> sampleRoutine(if (nowMinute < 6 * 60) day else day.plusDays(1), id) }
         store.refresh(weekDays)
+    }
+    // A month on screen (my 달 view, or "모두" which shows the month around the day) needs its
+    // repeating jellies laid down too.
+    val monthShown = space == Space.ALL || (space == Space.MINE && mode == ViewMode.MONTH)
+    val monthKey = selected.year * 100 + selected.monthValue
+    LaunchedEffect(monthShown, monthKey, today) {
+        if (monthShown) store.refresh(Planner.monthGrid(selected, data.settings.weekStartsOnSunday))
     }
 
     fun notify(message: String, undo: Boolean = false) {
@@ -218,7 +229,8 @@ fun JellyCalendarApp(
                         store.saveRoutine(routine, weekDays)
                         notify("${daysText(e.days)} 반복 젤리를 만들었어요")
                     } else {
-                        store.newJelly(title, e.flavor, e.duration, e.date, e.start, e.carryOver, e.note)
+                        store.newJelly(title, e.flavor, e.duration, e.date, e.start, e.carryOver, e.note, pinned = e.pinned)
+                        if (e.pinned && e.date != null) notify("📌 젤위로 고정했어요")
                     }
                 } else {
                     val moved = existing.date != e.date || existing.startMin != e.start
@@ -231,8 +243,10 @@ fun JellyCalendarApp(
                         carryOver = e.carryOver,
                         note = e.note,
                         wakeAnchored = existing.wakeAnchored && !moved && e.date != null,
+                        pinned = e.pinned && e.date != null,
                     )
-                    val edited = updated != existing
+                    // Pinning a day of a repeating jelly is not an edit that cuts it loose from the repeat.
+                    val edited = updated.copy(pinned = existing.pinned) != existing
                     store.saveJelly(updated.copy(detached = existing.detached || (edited && existing.routineId != null)))
                     if (e.days.isNotEmpty() && existing.routineId == null) {
                         val routine = Routine(
@@ -283,8 +297,11 @@ fun JellyCalendarApp(
         }
 
         override fun shift(direction: Int) {
-            val week = space == Space.MINE && mode == ViewMode.WEEK
-            selectedDay += if (week) 7L * direction else direction.toLong()
+            selectedDay = when {
+                space == Space.MINE && mode == ViewMode.WEEK -> selectedDay + 7L * direction
+                space == Space.MINE && mode == ViewMode.MONTH -> selected.plusMonths(direction.toLong()).toEpochDay()
+                else -> selectedDay + direction
+            }
         }
 
         override fun goToday() {
@@ -327,6 +344,10 @@ fun JellyCalendarApp(
             if (!platform.openAlarmList()) notify("시계 앱을 열 수 없어요")
         }
 
+        override fun foundGolden(jelly: Jelly) {
+            store.makeGolden(jelly.id)
+        }
+
         override fun openRoutines() {
             screen = Screen.ROUTINES
         }
@@ -360,20 +381,30 @@ fun JellyCalendarApp(
             selectedDay += direction.coerceIn(-1, 1).toLong()
         }
 
+        override fun showDay(date: LocalDate) {
+            selectedDay = date.toEpochDay()
+        }
+
         override fun showShared() {
             space = Space.SHARED
         }
     }
+    // In "모두" the page gets my own jellies of the six weeks around the day, enough for its box and
+    // its month; nothing else of mine ever reaches it.
     val host = SharedHost(
         all = space == Space.ALL,
         date = selected,
         personal = if (space == Space.ALL) {
-            Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED }
+            Planner.monthGrid(selected, data.settings.weekStartsOnSunday)
+                .flatMap { day -> Planner.scheduledOn(data, day) }
+                .filter { it.status != JellyStatus.MISSED }
         } else {
             emptyList()
         },
         doneByDoubleTap = data.settings.doneByDoubleTap,
         doneByLongPress = data.settings.doneByLongPress,
+        weekStartsOnSunday = data.settings.weekStartsOnSunday,
+        font = data.settings.font,
         actions = hostActions,
     )
 
@@ -426,6 +457,8 @@ fun JellyCalendarApp(
                         onBack = { screen = Screen.CALENDAR },
                         onChange = { store.updateSettings(it) },
                         onOpenGuide = { screen = Screen.GUIDE },
+                        golden = data.golden,
+                        onOpenGolden = { showGolden = true },
                         fonts = platform.fonts,
                         appVersion = platform.appVersion,
                         onOpenAlarms = { actions.openAlarms() },
@@ -489,8 +522,41 @@ fun JellyCalendarApp(
                             editor = null
                         },
                         onOpenRoutine = { editor = EditorState.editRoutine(it) },
+                        now = now,
+                        sundayFirst = data.settings.weekStartsOnSunday,
+                        canPin = { date -> date != null && Planner.canPin(store.current, date, e.jellyId) },
+                        onSetAlarm = { minute, label ->
+                            platform.setAlarm(minute / 60, minute % 60, label, data.settings.alarmSkipUi)
+                        },
                     )
                 }
+            }
+
+            // The golden jelly: a big surprise the first time, a wink after that.
+            LaunchedEffect(goldenNews) {
+                val news = goldenNews ?: return@LaunchedEffect
+                if (news.first) {
+                    // Let the jelly burst into gold before the news covers it.
+                    delay(1_200)
+                    celebrate = true
+                } else {
+                    notify("✨ 또 황금 젤리! 황금 코드는 설정에서 다시 볼 수 있어요")
+                    store.dismissGoldenNews()
+                }
+            }
+            val golden = data.golden
+            if (golden != null && (celebrate || showGolden)) {
+                GoldenDialog(
+                    find = golden,
+                    onShare = { text ->
+                        if (!platform.shareText(text, "황금 젤리 보내기")) notify("보낼 앱을 찾지 못했어요. 화면을 캡처해 주세요")
+                    },
+                    onDismiss = {
+                        store.dismissGoldenNews()
+                        celebrate = false
+                        showGolden = false
+                    },
+                )
             }
 
             confirmDelete?.let { e ->

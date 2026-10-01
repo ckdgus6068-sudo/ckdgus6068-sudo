@@ -24,9 +24,12 @@ val WEEKEND: Set<Int> = setOf(6, 7)
 @Serializable
 enum class JellyStatus { PLANNED, DONE, MISSED }
 
-/** Typeface of the app: round jelly lettering, a clean sans, or whatever the phone uses. */
+/**
+ * The lettering of jellies and headings: NANUM_ROUND (동글, NanumSquareRound), JUA (말랑, Jua),
+ * CLEAN (깔끔, Pretendard), ROUND (통통, Bagel Fat One), or SYSTEM, whatever the phone uses.
+ */
 @Serializable
-enum class FontChoice { ROUND, CLEAN, SYSTEM }
+enum class FontChoice { ROUND, CLEAN, SYSTEM, NANUM_ROUND, JUA }
 
 /**
  * One block of time ("jelly").
@@ -111,7 +114,7 @@ data class Settings(
     val boxHintDismissed: Boolean = false,
     /** The how-to screen opens by itself once, on the first launch that has it. */
     val guideSeen: Boolean = false,
-    val font: FontChoice = FontChoice.ROUND,
+    val font: FontChoice = FontChoice.NANUM_ROUND,
 )
 
 /** A wake-up time observed from the system's next alarm, remembered per day. */
@@ -144,6 +147,8 @@ data class AppData(
     val settings: Settings = Settings(),
     val lastAlarmRequest: AlarmRequest? = null,
     val seeded: Boolean = false,
+    /** The hidden golden jelly, once it has been found on this phone (GoldenJelly.kt). */
+    val golden: GoldenFind? = null,
 ) {
     fun jelly(id: String): Jelly? = jellies.firstOrNull { it.id == id }
     fun routine(id: String?): Routine? = id?.let { rid -> routines.firstOrNull { it.id == rid } }

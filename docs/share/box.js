@@ -22,14 +22,35 @@ const SLOP = 8;
 const SWIPE = 72;
 const LONG_PRESS_MS = 500;
 const DOUBLE_TAP_MS = 300;
-const TITLE_FONT = '"Bagel Fat One", "Pretendard Variable", Pretendard, system-ui, sans-serif';
 const BODY_FONT = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
+
+// The jelly lettering. The page picks it (app.js: FONTS) and every open box follows.
+let titleFace = { family: '"NanumSquareRound", "Pretendard Variable", Pretendard, system-ui, sans-serif', weight: 800 };
+const liveBoxes = new Set();
+
+/** Letters the jellies of every box in [family] at [weight]. */
+export function setTitleFace(family, weight) {
+  if (titleFace.family === family && titleFace.weight === weight) return;
+  titleFace = { family, weight };
+  for (const box of liveBoxes) box.restyle();
+}
+
+function titleFont(size) {
+  return `${titleFace.weight} ${size}px ${titleFace.family}`;
+}
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 
+// The hidden golden jelly (app.js: golden; GoldenJelly.kt in the app) has a flavour of its own.
+export const GOLDEN_FLAVOR = 10;
+const GOLD = '#FFC52A';
+const GOLD_SHEEN = ['#FFF3B0', '#FFC52A', '#E09A00'];
+const BURST_MS = 1100;
+
 export function boxColor(flavor) {
+  if (flavor === GOLDEN_FLAVOR) return GOLD;
   const n = BOX_COLORS.length;
   return BOX_COLORS[((flavor % n) + n) % n];
 }
@@ -394,6 +415,66 @@ class World {
   }
 }
 
+// ---------------------------------------------------------------- gold
+
+function blobBounds(blob) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < blob.n; i++) {
+    minX = Math.min(minX, blob.x[i]);
+    maxX = Math.max(maxX, blob.x[i]);
+    minY = Math.min(minY, blob.y[i]);
+    maxY = Math.max(maxY, blob.y[i]);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function drawStar(ctx, x, y, r, color) {
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.quadraticCurveTo(x, y, x, y + r);
+  ctx.quadraticCurveTo(x, y, x - r, y);
+  ctx.quadraticCurveTo(x, y, x, y - r);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+/** Little four-pointed stars twinkling on a jelly's edge; [strength] from 0 to 1. */
+function drawSparkles(ctx, blob, strength, count, now) {
+  const b = blobBounds(blob);
+  const cx = blob.centroidX();
+  const cy = blob.centroidY();
+  for (let i = 0; i < count; i++) {
+    const angle = i * 2.39996 + 0.6;
+    const twinkle = 0.55 + 0.45 * Math.sin(now / 140 + i * 1.7);
+    const r = (3.5 + 3 * twinkle) * (0.6 + 0.4 * strength);
+    const x = cx + Math.cos(angle) * (b.maxX - b.minX) * 0.42;
+    const y = cy + Math.sin(angle) * (b.maxY - b.minY) * 0.42;
+    drawStar(ctx, x, y, r, `rgba(255, 255, 255, ${((0.35 + 0.65 * twinkle) * strength).toFixed(3)})`);
+  }
+}
+
+/** Gold dust flying out when a jelly turns to gold; [t] from 0 to 1. */
+function drawBurst(ctx, blob, t) {
+  const b = blobBounds(blob);
+  const cx = blob.centroidX();
+  const cy = blob.centroidY();
+  const reach = Math.max(b.maxX - b.minX, b.maxY - b.minY) * (0.4 + 0.9 * t);
+  const fade = 1 - t;
+  ctx.beginPath();
+  ctx.arc(cx, cy, reach * 0.7, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255, 243, 176, ${(0.45 * fade).toFixed(3)})`;
+  ctx.fill();
+  for (let i = 0; i < 14; i++) {
+    const angle = (i * 2 * Math.PI) / 14 + 0.2;
+    const color = i % 2 === 0 ? `rgba(255, 197, 42, ${fade.toFixed(3)})` : `rgba(255, 255, 255, ${fade.toFixed(3)})`;
+    drawStar(ctx, cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach, 5 + 4 * fade, color);
+  }
+}
+
 // ---------------------------------------------------------------- labels
 
 /**
@@ -449,7 +530,7 @@ function layoutLabel(ctx, item, d) {
   let size = clamp(d * 0.17, 13, 30);
   let wrapped;
   for (;;) {
-    ctx.font = `900 ${size}px ${TITLE_FONT}`;
+    ctx.font = titleFont(size);
     wrapped = wrapText(ctx, title, maxWidth, 2);
     const height = wrapped.lines.length * size * 1.12;
     if ((!wrapped.overflow && !wrapped.split && height <= maxHeight * 0.72) || size <= 10) break;
@@ -522,6 +603,9 @@ export class JellyBox {
     this.world = new World();
     this.labels = new Map();
     this.fontEpoch = 0;
+    this.glitter = { key: null, level: 0 };
+    this.burstKey = null;
+    this.burstAt = 0;
     this.w = 0;
     this.h = 0;
     this.dpr = 1;
@@ -554,6 +638,14 @@ export class JellyBox {
     this.resizer.observe(host);
     this.measure();
     document.fonts?.ready?.then(() => this.relabel());
+    liveBoxes.add(this);
+  }
+
+  /** The lettering changed: fetch the new face for the labels and lay them out again. */
+  restyle() {
+    this.fontText = null;
+    this.loadFonts(this.items);
+    this.relabel();
   }
 
   setOptions(options) {
@@ -577,6 +669,7 @@ export class JellyBox {
   }
 
   destroy() {
+    liveBoxes.delete(this);
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     clearTimeout(this.gesture?.holdTimer);
@@ -621,7 +714,7 @@ export class JellyBox {
     if (text === this.fontText) return;
     this.fontText = text;
     Promise.all([
-      document.fonts.load(`900 20px ${TITLE_FONT}`, text),
+      document.fonts.load(titleFont(20), text),
       document.fonts.load(`600 12px ${BODY_FONT}`, text),
       document.fonts.load(`700 12px ${BODY_FONT}`, text),
     ]).then(() => this.relabel(), () => {});
@@ -712,7 +805,26 @@ export class JellyBox {
       if (steps === 4) this.acc = 0;
     }
     this.draw();
-    if (!this.world.isResting) this.raf = requestAnimationFrame(this.frame);
+    if (!this.world.isResting || this.bursting()) this.raf = requestAnimationFrame(this.frame);
+  }
+
+  /** How much the jelly [key] glitters, from 0 to 1: a hint that it is about to turn to gold. */
+  setGlitter(key, level) {
+    this.glitter = { key, level };
+    this.draw();
+  }
+
+  /** Gold dust bursting out of the jelly [key] as it turns to gold. */
+  burst(key) {
+    this.burstKey = key;
+    this.burstAt = performance.now();
+    this.world.blobs.get(key)?.kick(0.35);
+    this.buzz();
+    this.wake();
+  }
+
+  bursting() {
+    return this.burstKey != null && performance.now() - this.burstAt < BURST_MS;
   }
 
   draw() {
@@ -723,9 +835,18 @@ export class JellyBox {
     for (const blob of this.world.blobs.values()) {
       const item = this.byKey.get(blob.key);
       if (!item) continue;
+      const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
+      const flavor = gold ? GOLDEN_FLAVOR : item.flavor;
       tracePath(ctx, blob);
-      ctx.fillStyle = item.done ? doneColor(item.flavor) : boxColor(item.flavor);
+      ctx.fillStyle = item.done ? doneColor(flavor) : boxColor(flavor);
       ctx.fill();
+      if (gold && !item.done) {
+        const b = blobBounds(blob);
+        const sheen = ctx.createLinearGradient(b.minX, b.minY, b.maxX, b.maxY);
+        GOLD_SHEEN.forEach((c, i) => sheen.addColorStop(i / (GOLD_SHEEN.length - 1), c));
+        ctx.fillStyle = sheen;
+        ctx.fill();
+      }
       if (item.done) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
         ctx.lineWidth = 2.5;
@@ -746,6 +867,12 @@ export class JellyBox {
         this.labels.set(blob.key, label);
       }
       this.drawLabel(label, item, blob.centroidX(), blob.centroidY());
+      const now = performance.now();
+      if (gold) drawSparkles(ctx, blob, 1, 4, now);
+      if (this.glitter.key === blob.key && this.glitter.level > 0) {
+        drawSparkles(ctx, blob, this.glitter.level, 2 + Math.round(this.glitter.level * 4), now);
+      }
+      if (this.burstKey === blob.key && this.bursting()) drawBurst(ctx, blob, (now - this.burstAt) / BURST_MS);
     }
   }
 
@@ -760,7 +887,7 @@ export class JellyBox {
     }
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'center';
-    ctx.font = `900 ${label.size}px ${TITLE_FONT}`;
+    ctx.font = titleFont(label.size);
     ctx.fillStyle = item.done ? '#FFFFFF' : INK;
     for (const line of label.lines) {
       ctx.fillText(line, cx, y + label.lineHeight / 2);
@@ -870,7 +997,12 @@ export class JellyBox {
       this.world.release();
       this.wake();
     }
-    if (g.moved) return;
+    if (g.moved) {
+      // Squeezed and let go: one step towards the golden jelly.
+      const grabbed = this.byKey.get(g.key);
+      if (grabbed) this.options.onGrab?.(grabbed);
+      return;
+    }
     const item = this.byKey.get(g.key);
     if (!item) return;
     if (g.held) {

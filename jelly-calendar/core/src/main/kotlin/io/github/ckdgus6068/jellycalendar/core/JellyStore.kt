@@ -14,6 +14,9 @@ import kotlinx.serialization.json.Json
  * The single source of truth for the calendar. The UI observes [data]; the Android layer
  * persists every new value and feeds in the system's next alarm.
  */
+/** What just happened to the golden jelly: found for the first time on this phone, or once more. */
+data class GoldenNews(val find: GoldenFind, val first: Boolean)
+
 class JellyStore(
     initial: AppData,
     private val clock: () -> LocalDateTime = { LocalDateTime.now() },
@@ -25,6 +28,11 @@ class JellyStore(
 
     private val next = MutableStateFlow<NextAlarm?>(null)
     val nextAlarm: StateFlow<NextAlarm?> = next.asStateFlow()
+
+    private val golden = MutableStateFlow<GoldenNews?>(null)
+
+    /** Set when a jelly has just turned to gold, until the screen has celebrated it. */
+    val goldenNews: StateFlow<GoldenNews?> = golden.asStateFlow()
 
     private var undoSnapshot: AppData? = null
     private val canUndoState = MutableStateFlow(false)
@@ -47,6 +55,30 @@ class JellyStore(
             undoSnapshot = before
             canUndoState.value = true
         }
+    }
+
+    /**
+     * Turns the jelly [jellyId] to gold when it is one of this phone's (a shared jelly only glitters
+     * on the shared page). The first time on this phone, a golden code is written down.
+     */
+    fun makeGolden(jellyId: String?, code: () -> String = ::newGoldenCode): GoldenFind {
+        var news: GoldenNews? = null
+        state.update { data ->
+            val known = data.golden
+            val find = known ?: GoldenFind(code(), nowMillis())
+            news = GoldenNews(find, first = known == null)
+            val jellies = data.jellies.map {
+                // A day of a repeating jelly keeps its gold when the repeat is changed later.
+                if (it.id == jellyId) it.copy(flavor = GOLDEN_FLAVOR, detached = it.detached || it.routineId != null) else it
+            }
+            data.copy(golden = find, jellies = jellies)
+        }
+        golden.value = news
+        return news!!.find
+    }
+
+    fun dismissGoldenNews() {
+        golden.value = null
     }
 
     fun undo(): Boolean {

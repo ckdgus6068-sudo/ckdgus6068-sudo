@@ -18,7 +18,15 @@ class SoftBlob(
     cx: Float,
     cy: Float,
     area: Float,
+    /** A pinned jelly: held in place at the top of the box; the others bump into it but cannot move it. */
+    val fixed: Boolean = false,
 ) {
+    /**
+     * Still falling in from above the pinned row: it slips behind the pinned jellies instead of
+     * landing on them, so the space below them stays reachable.
+     */
+    var passing = !fixed
+
     var targetArea = area
         private set
     val n: Int = (12 + sqrt(area) / 9f).toInt().coerceIn(14, 28)
@@ -81,6 +89,7 @@ class SoftBlob(
     }
 
     fun integrate(gravity: Float, damping: Float) {
+        if (fixed) return
         for (i in 0 until n) {
             val vx = (x[i] - px[i]) * damping
             val vy = (y[i] - py[i]) * damping
@@ -90,6 +99,7 @@ class SoftBlob(
     }
 
     fun solveShape() {
+        if (fixed) return
         distance(1, restEdge, 0.9f)
         distance(2, restSkip, 0.15f)
         // Area constraint: push the ring out (or in) along its normals.
@@ -135,7 +145,18 @@ class SoftBlob(
         for (i in 0 until n) { x[i] += dx; y[i] += dy }
     }
 
+    /** Puts a pinned jelly back into its place as a round shape, at rest. */
+    fun placeAt(cx: Float, cy: Float) {
+        val r = sqrt(targetArea / PI.toFloat())
+        for (i in 0 until n) {
+            val a = (2 * PI * i / n).toFloat()
+            x[i] = cx + r * cos(a); y[i] = cy + r * sin(a)
+            px[i] = x[i]; py[i] = y[i]
+        }
+    }
+
     fun kick(strength: Float) {
+        if (fixed) return
         val cx = centroidX(); val cy = centroidY()
         for (i in 0 until n) {
             px[i] -= (x[i] - cx) * strength
@@ -208,8 +229,11 @@ class SoftBodyWorld {
         wake()
     }
 
-    fun add(id: String, area: Float, spawnX: Float, spawnY: Float) {
-        blobs[id] = SoftBlob(id, spawnX, spawnY, area)
+    /** Lower edge of the pinned row; jellies falling in pass the pinned ones until they are below it. */
+    var pinnedBottom = 0f
+
+    fun add(id: String, area: Float, spawnX: Float, spawnY: Float, fixed: Boolean = false) {
+        blobs[id] = SoftBlob(id, spawnX, spawnY, area, fixed)
         wake()
     }
 
@@ -220,6 +244,12 @@ class SoftBodyWorld {
     fun step(gravity: Float) {
         val iterations = 8
         for (b in blobs.values) b.integrate(gravity, 0.985f)
+        for (b in blobs.values) {
+            if (b.passing) {
+                b.updateBounds()
+                if (b.minY > pinnedBottom) b.passing = false
+            }
+        }
         repeat(iterations) {
             for (b in blobs.values) {
                 b.solveShape()
@@ -269,6 +299,9 @@ class SoftBodyWorld {
             for (bi in list.indices) {
                 if (ai == bi) continue
                 val b = list[bi]
+                if (a.fixed && b.fixed) continue
+                // A jelly still falling in slips behind the pinned ones.
+                if ((a.fixed && b.passing) || (b.fixed && a.passing)) continue
                 if (a.maxX < b.minX || a.minX > b.maxX || a.maxY < b.minY || a.minY > b.maxY) continue
                 for (i in 0 until a.n) {
                     val qx = a.x[i]; val qy = a.y[i]
@@ -285,17 +318,26 @@ class SoftBodyWorld {
                         if (d < best) { best = d; bj = j; bt = t; bx = cx; by = cy }
                     }
                     val dx = bx - qx; val dy = by - qy
-                    a.x[i] += dx * 0.5f; a.y[i] += dy * 0.5f
+                    // A pinned jelly does not give way: the other one takes the whole push.
+                    val share = when {
+                        b.fixed -> 1f
+                        a.fixed -> 0f
+                        else -> 0.5f
+                    }
+                    a.x[i] += dx * share; a.y[i] += dy * share
                     val k = if (bj + 1 == b.n) 0 else bj + 1
-                    b.x[bj] -= dx * 0.5f * (1 - bt); b.y[bj] -= dy * 0.5f * (1 - bt)
-                    b.x[k] -= dx * 0.5f * bt; b.y[k] -= dy * 0.5f * bt
+                    val back = 1f - share
+                    b.x[bj] -= dx * back * (1 - bt); b.y[bj] -= dy * back * (1 - bt)
+                    b.x[k] -= dx * back * bt; b.y[k] -= dy * back * bt
                 }
             }
         }
     }
 
+    /** The jelly under a finger; pinned ones first, since they are drawn on top. */
     fun blobAt(qx: Float, qy: Float): SoftBlob? {
-        for (b in blobs.values.reversed()) {
+        val order = blobs.values.filter { it.fixed } + blobs.values.filterNot { it.fixed }.reversed()
+        for (b in order) {
             b.updateBounds()
             if (b.contains(qx, qy)) return b
         }

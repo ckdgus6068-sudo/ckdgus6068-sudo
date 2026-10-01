@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
+import io.github.ckdgus6068.jellycalendar.core.GOLDEN_FLAVOR
 
 /** One jelly colour: a pastel body, a deep "filled" colour for done jellies and a readable ink. */
 @Immutable
@@ -39,7 +40,11 @@ object JellyFlavors {
         JellyFlavor("우유", Color(0xFFF4F6FA), Color(0xFFD7DDE7), Color(0xFF7F8BA1), Color(0xFF3A4252)),
     )
 
-    operator fun get(index: Int): JellyFlavor = all[Math.floorMod(index, all.size)]
+    /** The hidden golden jelly's colours (GOLDEN_FLAVOR); never offered in the colour picker. */
+    val golden = JellyFlavor("황금", Color(0xFFFFF3C4), Color(0xFFFFD24D), Color(0xFFD99A00), Color(0xFF5C3B00))
+
+    operator fun get(index: Int): JellyFlavor =
+        if (index == GOLDEN_FLAVOR) golden else all[Math.floorMod(index, all.size)]
 }
 
 /** Colours of the calendar around the jellies. */

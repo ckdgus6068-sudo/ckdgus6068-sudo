@@ -6,15 +6,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import io.github.ckdgus6068.jellycalendar.core.FontChoice
 
+/** A display face, declared at the one weight it is drawn in so Compose never fakes another. */
+@Immutable
+class DisplayFace(val family: FontFamily, val weight: FontWeight)
+
 /**
  * The typefaces shipped with the app, loaded by the platform side.
- * [round] is Bagel Fat One, declared as one Black weight so it is never artificially bolded.
- * [clean] is Pretendard in Regular, SemiBold and Bold.
+ * [clean] is Pretendard in Regular, SemiBold and Bold: the body text of every bundled choice and
+ * the lettering of [FontChoice.CLEAN]. [faces] letters the other choices.
  */
 @Immutable
-class BundledFonts(val round: FontFamily?, val clean: FontFamily?) {
+class BundledFonts(val clean: FontFamily?, val faces: Map<FontChoice, DisplayFace> = emptyMap()) {
     companion object {
-        val None = BundledFonts(null, null)
+        val None = BundledFonts(null)
     }
 }
 
@@ -32,13 +36,25 @@ data class JellyType(
 val SystemJellyType = JellyType(FontFamily.Default, FontWeight.ExtraBold, FontFamily.Default)
 
 fun jellyType(choice: FontChoice, fonts: BundledFonts): JellyType {
+    if (choice == FontChoice.SYSTEM) return SystemJellyType
     val clean = fonts.clean
-    val round = fonts.round
+    val face = fonts.faces[choice]
     return when {
-        choice == FontChoice.ROUND && round != null -> JellyType(round, FontWeight.Black, clean ?: FontFamily.Default)
-        choice != FontChoice.SYSTEM && clean != null -> JellyType(clean, FontWeight.Bold, clean)
+        face != null -> JellyType(face.family, face.weight, clean ?: FontFamily.Default)
+        clean != null -> JellyType(clean, FontWeight.Bold, clean)
         else -> SystemJellyType
     }
+}
+
+/** The choices offered in settings, gentlest first. */
+val FontChoices = listOf(FontChoice.NANUM_ROUND, FontChoice.JUA, FontChoice.CLEAN, FontChoice.ROUND, FontChoice.SYSTEM)
+
+fun fontName(choice: FontChoice): String = when (choice) {
+    FontChoice.NANUM_ROUND -> "동글"
+    FontChoice.JUA -> "말랑"
+    FontChoice.CLEAN -> "깔끔"
+    FontChoice.ROUND -> "통통"
+    FontChoice.SYSTEM -> "휴대폰 글꼴"
 }
 
 val LocalJellyType = staticCompositionLocalOf { SystemJellyType }
