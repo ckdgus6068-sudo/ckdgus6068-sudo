@@ -95,7 +95,7 @@
 
 - Bagel Fat One: Copyright 2022 The Bagel Fat Project Authors. SIL Open Font License 1.1.
 - Pretendard: Copyright (c) 2021 Kil Hyung-jin. SIL Open Font License 1.1.
-- 글꼴 파일은 `app/src/main/res/font`에 원본 그대로 들어 있고, 라이선스 전문은 `app/src/main/assets/licenses`에 있습니다. 두 글꼴 때문에 APK 크기가 약 6MB 늘었습니다.
+- 글꼴 파일은 `app/src/main/res/font`에 원본 그대로 들어 있고, 라이선스 전문은 `app/src/main/assets/licenses`에 있습니다. 두 글꼴 때문에 APK 크기가 약 4MB 늘었습니다(약 6.9MB에서 10.8MB).
 
 ## 검증 범위
 
