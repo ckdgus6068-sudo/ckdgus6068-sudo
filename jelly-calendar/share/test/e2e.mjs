@@ -182,16 +182,13 @@ try {
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
 
   // The server holds no readable names, titles or memos: look at the raw documents in the emulator.
-  const raw = await fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
+  const rawDocs = (collectionId) => fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
-    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'jellies', allDescendants: true }, { collectionId: 'memos', allDescendants: true }] } }),
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId, allDescendants: true }] } }),
   }).then((r) => r.text());
-  const members = await fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
-    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'members', allDescendants: true }] } }),
-  }).then((r) => r.text());
+  const raw = (await rawDocs('jellies')) + (await rawDocs('memos'));
+  const members = (await rawDocs('members')) + (await rawDocs('spaces'));
   // Write times are kept in the clear (they look like 2026-10-01T05:52:11Z); the jellies' own dates are not.
   const leaks = ['저녁 약속', '부모님 생신', '2번 출구', '7시 반에 봐요', '창현', '지은', `${month}-10`, `${month}-17`, '19:30', '1170']
     .filter((t) => raw.includes(t) || members.includes(t));
