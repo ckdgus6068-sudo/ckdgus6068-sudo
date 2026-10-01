@@ -189,6 +189,7 @@ fun CalendarScreen(
                         onSwipe = { actions.shift(it) },
                         modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp).padding(bottom = 8.dp),
                         onGolden = { actions.foundGolden(it) },
+                        idleWobble = data.settings.idleWobble,
                     )
                     ViewMode.MONTH -> MonthView(
                         data = data,

@@ -441,7 +441,12 @@ function applyFont(id) {
 
 /** How the finishing gestures are set up in the app (both on in a browser). */
 function gestures() {
-  return { doubleTap: state.host?.doubleTap !== false, longPress: state.host?.longPress !== false };
+  return {
+    doubleTap: state.host?.doubleTap !== false,
+    longPress: state.host?.longPress !== false,
+    // Inside the app, pinned jellies sway only while "말랑말랑 숨쉬기" is on.
+    sway: state.host?.wobble !== false,
+  };
 }
 
 /** One line in the app's log, so a broken viewport inside the app's web view shows up in tests. */
@@ -1579,10 +1584,11 @@ function renderSharedBox() {
       prevLabel: '전날',
       nextLabel: '다음 날',
     }),
-    savedSpaces().length > 1
-      ? h('button', { class: 'space-switch box-switch', onClick: () => openSheet({ kind: 'groups' }), 'data-testid': 'groups' },
-          `${groupName(groups.get(state.spaceId))} ▾`)
-      : null,
+    // replaceChildren() would print a null as the text "null".
+    ...(savedSpaces().length > 1
+      ? [h('button', { class: 'space-switch box-switch', onClick: () => openSheet({ kind: 'groups' }), 'data-testid': 'groups' },
+          `${groupName(groups.get(state.spaceId))} ▾`)]
+      : []),
   );
   v.note.replaceChildren(...[offlineBanner()].filter(Boolean));
   v.bar.replaceChildren(bottomBar());

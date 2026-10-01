@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -74,6 +75,7 @@ import io.github.ckdgus6068.jellycalendar.ui.drag.DropTarget
 import io.github.ckdgus6068.jellycalendar.ui.durationText
 import io.github.ckdgus6068.jellycalendar.ui.hm
 import io.github.ckdgus6068.jellycalendar.ui.keepWords
+import io.github.ckdgus6068.jellycalendar.ui.jelly.rememberJellyClock
 import io.github.ckdgus6068.jellycalendar.ui.theme.JellyType
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyType
@@ -82,6 +84,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** Loud, flat colours in the spirit of the reference puzzle game, one per flavour. */
@@ -137,6 +140,8 @@ fun JellyBoxBoard(
     modifier: Modifier = Modifier,
     /** The same jelly was grabbed and let go [GOLDEN_GRABS] times in a row (GoldenJelly.kt). */
     onGolden: (Jelly) -> Unit = {},
+    /** Pinned jellies sway on their pins while the box is still ("말랑말랑 숨쉬기"). */
+    idleWobble: Boolean = true,
 ) {
     val world = remember { SoftBodyWorld() }
     var frame by remember { mutableIntStateOf(0) }
@@ -223,10 +228,16 @@ fun JellyBoxBoard(
                     val blob = world.blobs[jelly.id]
                     if (blob == null) {
                         world.add(jelly.id, area, cx, cy, fixed = true)
+                        // A little wobble as it is pinned up.
+                        world.blobs[jelly.id]?.squish(0.012f)
                     } else {
-                        if (abs(blob.targetArea - area) > 1f) blob.resize(area)
-                        blob.placeAt(cx, cy)
-                        world.wake()
+                        // Laid down again only when its spot or size changed, so a wobble is not cut short.
+                        val resized = abs(blob.targetArea - area) > 1f
+                        if (resized) blob.resize(area)
+                        if (resized || abs(blob.homeX - cx) > 0.5f || abs(blob.homeY - cy) > 0.5f) {
+                            blob.placeAt(cx, cy)
+                            world.wake()
+                        }
                     }
                 }
                 var spawnY = -40f
@@ -259,6 +270,8 @@ fun JellyBoxBoard(
                 }
             }
 
+            // Pinned jellies swing a little from side to side around their pins, and bob.
+            val sway by rememberJellyClock(idleWobble && pinned.isNotEmpty())
             Canvas(
                 Modifier
                     .fillMaxSize()
@@ -282,7 +295,7 @@ fun JellyBoxBoard(
                                 return@awaitEachGesture
                             }
                             val id = blob.id
-                            blob.kick(-0.03f)
+                            if (blob.fixed) blob.squish(0.015f) else blob.kick(-0.03f)
                             world.wake()
 
                             // Released quickly, moved, or held?
@@ -316,7 +329,7 @@ fun JellyBoxBoard(
                                         if (again?.id == id && up != null) {
                                             up.consume()
                                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            world.blobs[id]?.kick(0.12f)
+                                            world.blobs[id]?.finishWobble()
                                             world.wake()
                                             toggle(tapped)
                                             return@awaitEachGesture
@@ -330,19 +343,8 @@ fun JellyBoxBoard(
                             // Held or dragged: the jelly follows the finger inside the box. Once the finger
                             // leaves the box, the calendar-wide drag takes over and floats the jelly over
                             // the screen, so it can be dropped on a day above or into the tray below.
+                            // A pinned jelly stays on its pin and stretches after the finger instead.
                             val jelly = current.find { it.id == id } ?: return@awaitEachGesture
-                            if (blob.fixed) {
-                                // A pinned jelly stays put: holding it and letting go still finishes it.
-                                if (held && longPress) {
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    val up = waitForUpOrCancellation()
-                                    if (up != null) {
-                                        up.consume()
-                                        toggle(jelly)
-                                    }
-                                }
-                                return@awaitEachGesture
-                            }
                             if (held) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             val start = movedTo ?: down.position
                             world.grab(blob, start.x, start.y)
@@ -358,7 +360,7 @@ fun JellyBoxBoard(
                                         if (handedOver) {
                                             drag.end()
                                         } else if (!dragging && longPress) {
-                                            world.blobs[id]?.kick(0.12f)
+                                            world.blobs[id]?.finishWobble()
                                             toggle(jelly)
                                         } else if (dragging) {
                                             // Squeezed and let go inside the box: one step towards gold.
@@ -380,7 +382,7 @@ fun JellyBoxBoard(
                                         travel += change.positionChange()
                                         if (travel.getDistance() > slop * 0.5f) dragging = true
                                     }
-                                    if (dragging && !handedOver && !bounds.contains(root)) {
+                                    if (dragging && !handedOver && !blob.fixed && !bounds.contains(root)) {
                                         val pill = drag.tray?.pillSize(jelly.durationMin)
                                             ?: Size(120.dp.toPx(), 50.dp.toPx())
                                         world.release()
@@ -410,16 +412,15 @@ fun JellyBoxBoard(
             ) {
                 if (frame < 0 || streakTick < 0) return@Canvas
                 val path = Path()
-                // Pinned jellies are drawn last, on top of the ones falling in behind them.
-                for (blob in world.blobs.values.sortedBy { it.fixed }) {
-                    val jelly = current.find { it.id == blob.id } ?: continue
+
+                fun drawJelly(blob: SoftBlob, jelly: Jelly) {
                     blobPath(blob, path)
                     val base = boxColor(jelly.flavor)
                     val color = if (jelly.isDone) lerp(base, Color.Black, 0.35f) else base
                     // Carried away over the calendar: only a faint shape stays behind.
                     val away = drag.isGhost(jelly.id) || drag.isHidden(jelly.id)
                     drawPath(path, if (away) color.copy(alpha = 0.25f) else color)
-                    if (away) continue
+                    if (away) return
                     val gold = jelly.flavor == GOLDEN_FLAVOR
                     val glitter = streak.glitter(jelly.id)
                     if (gold || glitter > 0f) blob.updateBounds()
@@ -445,9 +446,25 @@ fun JellyBoxBoard(
                     if (gold) drawSparkles(blob, 1f, frame, 4)
                     if (glitter > 0f) drawSparkles(blob, glitter, frame, 2 + (glitter * 4).roundToInt())
                     if (burstId == blob.id) drawBurst(Offset(blob.centroidX(), blob.centroidY()), blob, burst.value)
-                    if (blob.fixed) {
-                        blob.updateBounds()
-                        drawPin(Offset(blob.centroidX(), blob.minY), 9.dp.toPx())
+                    if (blob.fixed) drawPin(Offset(blob.pinX, blob.pinY), 9.dp.toPx())
+                }
+
+                val seconds = if (idleWobble) sway else 0f
+                // Pinned jellies are drawn last, on top of the ones falling in behind them.
+                for (blob in world.blobs.values.sortedBy { it.fixed }) {
+                    val jelly = current.find { it.id == blob.id } ?: continue
+                    if (blob.fixed && idleWobble) {
+                        val phase = swayPhase(blob.id)
+                        val bob = 1f + 0.02f * sin(seconds * 3.3f + phase * 1.7f)
+                        val pivot = Offset(blob.pinX, blob.pinY)
+                        withTransform({
+                            rotate(degrees = 2.3f * sin(seconds * 1.9f + phase), pivot = pivot)
+                            scale(scaleX = 1f / sqrt(bob), scaleY = bob, pivot = pivot)
+                        }) {
+                            drawJelly(blob, jelly)
+                        }
+                    } else {
+                        drawJelly(blob, jelly)
                     }
                 }
             }
@@ -595,6 +612,18 @@ private fun DrawScope.drawStar(c: Offset, r: Float, color: Color) {
         close()
     }
     drawPath(star, color)
+}
+
+/** Where in its swing a pinned jelly starts, so that two side by side do not swing together. */
+private fun swayPhase(id: String): Float {
+    var n = 0
+    for (c in id) n = (n * 31 + c.code) % 6283
+    return n / 1000f
+}
+
+/** The wobble of a jelly that was just finished: a pinned one squishes, the others swell. */
+private fun SoftBlob.finishWobble() {
+    if (fixed) squish(0.025f) else kick(0.12f)
 }
 
 /** A little push pin stuck into the top of a pinned jelly. */

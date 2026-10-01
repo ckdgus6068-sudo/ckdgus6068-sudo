@@ -1,9 +1,11 @@
 package io.github.ckdgus6068.jellycalendar.ui.box
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.channels.Channel
@@ -18,9 +20,17 @@ class SoftBlob(
     cx: Float,
     cy: Float,
     area: Float,
-    /** A pinned jelly: held in place at the top of the box; the others bump into it but cannot move it. */
+    /**
+     * A pinned jelly: it hangs from a pin at the top of the box. The pin grips the top of it and a
+     * weak spring draws its middle back under the pin; the rest of its body stays soft.
+     */
     val fixed: Boolean = false,
 ) {
+    /** Where a pinned jelly's middle belongs. */
+    var homeX = cx
+        private set
+    var homeY = cy
+        private set
     /**
      * Still falling in from above the pinned row: it slips behind the pinned jellies instead of
      * landing on them, so the space below them stays reachable.
@@ -30,6 +40,9 @@ class SoftBlob(
     var targetArea = area
         private set
     val n: Int = (12 + sqrt(area) / 9f).toInt().coerceIn(14, 28)
+
+    /** The point at the top, where the pin goes in (the ring starts on the right and runs clockwise). */
+    private val pinIndex = (3f * n / 4f).roundToInt() % n
     val x = FloatArray(n)
     val y = FloatArray(n)
     val px = FloatArray(n)
@@ -89,7 +102,6 @@ class SoftBlob(
     }
 
     fun integrate(gravity: Float, damping: Float) {
-        if (fixed) return
         for (i in 0 until n) {
             val vx = (x[i] - px[i]) * damping
             val vy = (y[i] - py[i]) * damping
@@ -99,7 +111,6 @@ class SoftBlob(
     }
 
     fun solveShape() {
-        if (fixed) return
         distance(1, restEdge, 0.9f)
         distance(2, restSkip, 0.15f)
         // Area constraint: push the ring out (or in) along its normals.
@@ -145,8 +156,26 @@ class SoftBlob(
         for (i in 0 until n) { x[i] += dx; y[i] += dy }
     }
 
-    /** Puts a pinned jelly back into its place as a round shape, at rest. */
+    /** Holds a pinned jelly by its pin, and draws its middle slowly back under it. */
+    fun holdHome() {
+        push((homeX - centroidX()) * PIN_HOLD, (homeY - centroidY()) * PIN_HOLD)
+        val r = sqrt(targetArea / PI.toFloat())
+        for (o in -1..1) {
+            val i = (pinIndex + o + n) % n
+            val a = (2 * PI * i / n).toFloat()
+            x[i] += (homeX + r * cos(a) - x[i]) * PIN_GRIP
+            y[i] += (homeY + r * sin(a) - y[i]) * PIN_GRIP
+        }
+    }
+
+    /** Where the pin goes in: the top of the jelly, as it moves. */
+    val pinX: Float get() = x[pinIndex]
+    val pinY: Float get() = y[pinIndex]
+
+    /** Puts a pinned jelly at its spot as a round shape, at rest. */
     fun placeAt(cx: Float, cy: Float) {
+        homeX = cx
+        homeY = cy
         val r = sqrt(targetArea / PI.toFloat())
         for (i in 0 until n) {
             val a = (2 * PI * i / n).toFloat()
@@ -155,8 +184,19 @@ class SoftBlob(
         }
     }
 
+    /**
+     * Sets the jelly wobbling without changing its size: wider and flatter first, then back and
+     * forth. (A kick swells it, which its pressure mostly takes back at once.)
+     */
+    fun squish(strength: Float) {
+        val cx = centroidX(); val cy = centroidY()
+        for (i in 0 until n) {
+            px[i] -= (x[i] - cx) * strength
+            py[i] += (y[i] - cy) * strength
+        }
+    }
+
     fun kick(strength: Float) {
-        if (fixed) return
         val cx = centroidX(); val cy = centroidY()
         for (i in 0 until n) {
             px[i] -= (x[i] - cx) * strength
@@ -184,7 +224,7 @@ class SoftBodyWorld {
     var quietDrift = 2f
     private var frames = 0
     private var quietWindows = 0
-    private var snapshot: Map<String, Pair<Float, Float>>? = null
+    private var snapshot: Map<String, FloatArray>? = null
 
     /** The held jelly follows the finger at ([grabX], [grabY]), keeping the offset it was grabbed at. */
     var grabId: String? = null
@@ -215,13 +255,54 @@ class SoftBodyWorld {
         wakeSignal.receive()
     }
 
+    // A pinned jelly is stretched instead: the side facing the way the finger goes follows it.
+    private var grabStartX = 0f
+    private var grabStartY = 0f
+    private var grabIndex = -1
+    private var grabRestX = 0f
+    private var grabRestY = 0f
+
     fun grab(blob: SoftBlob, x: Float, y: Float) {
         grabId = blob.id
         grabOffsetX = x - blob.centroidX()
         grabOffsetY = y - blob.centroidY()
         grabX = x
         grabY = y
+        grabStartX = x
+        grabStartY = y
+        grabIndex = -1
         wake()
+    }
+
+    /** Pulls one side of a pinned jelly after the finger, by up to most of its size; the pin holds the rest. */
+    private fun stretch(b: SoftBlob) {
+        val fx = grabX - grabStartX
+        val fy = grabY - grabStartY
+        val d = hypot(fx, fy)
+        val r = sqrt(b.targetArea / PI.toFloat())
+        if (grabIndex < 0) {
+            if (d < 3f) return
+            val cx = b.centroidX(); val cy = b.centroidY()
+            var best = -Float.MAX_VALUE
+            for (i in 0 until b.n) {
+                val dot = (b.x[i] - cx) * fx + (b.y[i] - cy) * fy
+                if (dot > best) { best = dot; grabIndex = i }
+            }
+            // Where that side sits when the jelly is round and at its spot.
+            val ox = b.x[grabIndex] - cx; val oy = b.y[grabIndex] - cy
+            val len = hypot(ox, oy).takeIf { it > 0f } ?: 1f
+            grabRestX = b.homeX + ox / len * r
+            grabRestY = b.homeY + oy / len * r
+        }
+        val reach = 0.9f * r
+        val k = if (d > reach) reach / d else 1f
+        val gx = grabRestX + fx * k - b.x[grabIndex]
+        val gy = grabRestY + fy * k - b.y[grabIndex]
+        for (o in -3..3) {
+            val w = STRETCH[abs(o)] * 0.12f
+            val i = (grabIndex + o + b.n) % b.n
+            b.x[i] += gx * w; b.y[i] += gy * w
+        }
     }
 
     fun release() {
@@ -243,7 +324,8 @@ class SoftBodyWorld {
 
     fun step(gravity: Float) {
         val iterations = 8
-        for (b in blobs.values) b.integrate(gravity, 0.985f)
+        // Pinned jellies hang on their pins: no falling, and they settle a little sooner.
+        for (b in blobs.values) b.integrate(if (b.fixed) 0f else gravity, if (b.fixed) PIN_DAMPING else 0.985f)
         for (b in blobs.values) {
             if (b.passing) {
                 b.updateBounds()
@@ -253,9 +335,14 @@ class SoftBodyWorld {
         repeat(iterations) {
             for (b in blobs.values) {
                 b.solveShape()
+                if (b.fixed) b.holdHome()
                 if (b.id == grabId) {
-                    val cx = b.centroidX(); val cy = b.centroidY()
-                    b.push((grabX - grabOffsetX - cx) * 0.18f, (grabY - grabOffsetY - cy) * 0.18f)
+                    if (b.fixed) {
+                        stretch(b)
+                    } else {
+                        val cx = b.centroidX(); val cy = b.centroidY()
+                        b.push((grabX - grabOffsetX - cx) * 0.18f, (grabY - grabOffsetY - cy) * 0.18f)
+                    }
                 }
             }
             for (b in blobs.values) b.updateBounds()
@@ -267,12 +354,19 @@ class SoftBodyWorld {
         restFrames = if (energy < 0.004f) restFrames + 1 else 0
         frames++
         if (frames % QUIET_FRAMES == 0) {
-            val now = blobs.mapValues { (_, b) -> b.centroidX() to b.centroidY() }
+            // A pinned jelly's middle hardly moves, so its width and height have to settle too.
+            val now = blobs.mapValues { (_, b) ->
+                floatArrayOf(b.centroidX(), b.centroidY(), if (b.fixed) b.maxX - b.minX else 0f, if (b.fixed) b.maxY - b.minY else 0f)
+            }
             snapshot?.let { before ->
                 var drift = 0f
                 for ((id, at) in now) {
                     val was = before[id]
-                    drift = if (was == null) Float.MAX_VALUE else max(drift, hypot(at.first - was.first, at.second - was.second))
+                    drift = if (was == null) {
+                        Float.MAX_VALUE
+                    } else {
+                        max(drift, maxOf(hypot(at[0] - was[0], at[1] - was[1]), abs(at[2] - was[2]), abs(at[3] - was[3])))
+                    }
                 }
                 quietWindows = if (drift < quietDrift) quietWindows + 1 else 0
             }
@@ -318,10 +412,10 @@ class SoftBodyWorld {
                         if (d < best) { best = d; bj = j; bt = t; bx = cx; by = cy }
                     }
                     val dx = bx - qx; val dy = by - qy
-                    // A pinned jelly does not give way: the other one takes the whole push.
+                    // A pinned jelly hardly gives way: the other one takes most of the push.
                     val share = when {
-                        b.fixed -> 1f
-                        a.fixed -> 0f
+                        b.fixed -> 0.85f
+                        a.fixed -> 0.15f
                         else -> 0.5f
                     }
                     a.x[i] += dx * share; a.y[i] += dy * share
@@ -350,5 +444,13 @@ class SoftBodyWorld {
     private companion object {
         const val QUIET_FRAMES = 30
         const val MAX_FRAMES = 900
+        const val PIN_DAMPING = 0.95f
+
+        /** How much the points next to the pulled one follow it when a pinned jelly is stretched. */
+        val STRETCH = floatArrayOf(1f, 0.7f, 0.4f, 0.15f)
     }
 }
+
+/** How hard a pin grips the top of its jelly, and how strongly the jelly's middle is drawn back under it. */
+private const val PIN_GRIP = 0.3f
+private const val PIN_HOLD = 0.006f

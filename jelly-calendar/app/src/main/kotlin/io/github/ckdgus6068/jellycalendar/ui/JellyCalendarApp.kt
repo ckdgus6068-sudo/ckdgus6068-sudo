@@ -397,6 +397,7 @@ fun JellyCalendarApp(
         doneByLongPress = data.settings.doneByLongPress,
         weekStartsOnSunday = data.settings.weekStartsOnSunday,
         font = data.settings.font,
+        idleWobble = data.settings.idleWobble,
         actions = hostActions,
     )
 

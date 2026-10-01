@@ -261,6 +261,30 @@ try {
   await a.goBack();
   await a.waitForFunction(() => window.__jellyBox?.centers().some((c) => c.title === '부모님 생신' && c.fixed), null, { timeout: 10000 });
   check(true, 'galaxy box: a pinned jelly is held at the top');
+  check(await a.evaluate(() => !document.body.innerText.split('\n').some((line) => line.trim() === 'null')), 'galaxy box: no stray "null" above the box');
+  // Pulled down by a finger, a pinned jelly stretches and springs back to its pin.
+  await settled(a, 2);
+  const hung = (await box(a)).find((c) => c.title === '부모님 생신');
+  await a.mouse.move(hung.x, hung.y);
+  await a.mouse.down();
+  await a.mouse.move(hung.x + 10, hung.y + 140, { steps: 10 });
+  const pulled = await a.evaluate(() => {
+    const blob = [...window.__jellyBox.world.blobs.values()].find((b) => b.fixed);
+    blob.updateBounds();
+    return blob.maxY - blob.minY;
+  });
+  await a.mouse.up();
+  await settled(a, 2);
+  const back = (await box(a)).find((c) => c.title === '부모님 생신');
+  const round = await a.evaluate(() => {
+    const blob = [...window.__jellyBox.world.blobs.values()].find((b) => b.fixed);
+    blob.updateBounds();
+    return { w: blob.maxX - blob.minX, h: blob.maxY - blob.minY };
+  });
+  check(
+    back.fixed && Math.hypot(back.x - hung.x, back.y - hung.y) < 3 && pulled > round.h * 1.15 && Math.abs(round.w - round.h) < 3,
+    `galaxy box: a pinned jelly stretches (${Math.round(pulled)}px tall) and springs back to its pin (${Math.round(round.w)}x${Math.round(round.h)})`,
+  );
   await b.locator(`[data-day="${month}-17"] .mini.pinned`).waitFor({ timeout: 10000 });
   check(true, 'iphone: sees the jelly pinned in the month grid');
   await shot(a, '8b-galaxy-box-pinned');

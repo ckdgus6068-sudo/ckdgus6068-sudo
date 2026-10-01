@@ -337,6 +337,7 @@ class MainActivity : ComponentActivity() {
             .put("longPress", host.doneByLongPress)
             .put("sundayFirst", host.weekStartsOnSunday)
             .put("font", host.font.name)
+            .put("wobble", host.idleWobble)
             .put("personal", personal)
             .toString()
     }

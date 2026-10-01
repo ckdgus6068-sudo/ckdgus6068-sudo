@@ -48,6 +48,15 @@ export const GOLDEN_FLAVOR = 10;
 const GOLD = '#FFC52A';
 const GOLD_SHEEN = ['#FFF3B0', '#FFC52A', '#E09A00'];
 const BURST_MS = 1100;
+// A pinned jelly hangs from its pin: the pin grips the top of it, and a weak spring on its middle
+// keeps it from swinging away. The rest of its body stays soft.
+const PIN_GRIP = 0.3;
+const PIN_HOLD = 0.006;
+const PIN_DAMPING = 0.95;
+// How much the points next to the pulled one follow it when a pinned jelly is stretched.
+const STRETCH = [1, 0.7, 0.4, 0.15];
+// Between frames of a pinned jelly's sway, once everything else is still (about 25 a second).
+const SWAY_MS = 40;
 
 export function boxColor(flavor) {
   if (flavor === GOLDEN_FLAVOR) return GOLD;
@@ -82,13 +91,17 @@ function durationText(min) {
 class Blob {
   constructor(key, cx, cy, area, fixed = false) {
     this.key = key;
-    // A pinned jelly (젤위로 고정): held in place at the top; the others bump into it but cannot move it.
+    // A pinned jelly (젤위로 고정): held at its spot at the top by a spring, but soft like the others.
     this.fixed = fixed;
+    this.homeX = cx;
+    this.homeY = cy;
     // Still falling in from above the pinned row: it slips behind the pinned jellies until it is below them.
     this.passing = !fixed;
     this.targetArea = area;
     const n = clamp(Math.floor(12 + (Math.sqrt(area) * REF_DPR) / 9), 14, 28);
     this.n = n;
+    // The point at the top, where the pin goes in (the ring starts on the right and runs clockwise).
+    this.pinIndex = Math.round((3 * n) / 4) % n;
     this.x = new Float64Array(n);
     this.y = new Float64Array(n);
     this.px = new Float64Array(n);
@@ -169,7 +182,6 @@ class Blob {
   }
 
   integrate(gravity, damping) {
-    if (this.fixed) return;
     const { x, y, px, py, n } = this;
     for (let i = 0; i < n; i++) {
       const vx = (x[i] - px[i]) * damping;
@@ -182,7 +194,6 @@ class Blob {
   }
 
   solveShape() {
-    if (this.fixed) return;
     this.distance(1, this.restEdge, 0.9);
     this.distance(2, this.restSkip, 0.15);
     // Area constraint: push the ring out (or in) along its normals.
@@ -238,8 +249,31 @@ class Blob {
     }
   }
 
-  /** Puts a pinned jelly back into its place as a round shape, at rest. */
+  /** Holds a pinned jelly by its pin, and draws its middle slowly back under it. */
+  holdHome() {
+    this.push((this.homeX - this.centroidX()) * PIN_HOLD, (this.homeY - this.centroidY()) * PIN_HOLD);
+    const r = Math.sqrt(this.targetArea / Math.PI);
+    for (let o = -1; o <= 1; o++) {
+      const i = (this.pinIndex + o + this.n) % this.n;
+      const a = (2 * Math.PI * i) / this.n;
+      this.x[i] += (this.homeX + r * Math.cos(a) - this.x[i]) * PIN_GRIP;
+      this.y[i] += (this.homeY + r * Math.sin(a) - this.y[i]) * PIN_GRIP;
+    }
+  }
+
+  /** Where the pin goes in: the top of the jelly, as it moves. */
+  pinX() {
+    return this.x[this.pinIndex];
+  }
+
+  pinY() {
+    return this.y[this.pinIndex];
+  }
+
+  /** Puts a pinned jelly at its spot as a round shape, at rest. */
   placeAt(cx, cy) {
+    this.homeX = cx;
+    this.homeY = cy;
     const r = Math.sqrt(this.targetArea / Math.PI);
     for (let i = 0; i < this.n; i++) {
       const a = (2 * Math.PI * i) / this.n;
@@ -248,8 +282,20 @@ class Blob {
     }
   }
 
+  /**
+   * Sets the jelly wobbling without changing its size: wider and flatter first, then back and forth.
+   * (A kick swells it, which its pressure mostly takes back at once.)
+   */
+  squish(strength) {
+    const cx = this.centroidX();
+    const cy = this.centroidY();
+    for (let i = 0; i < this.n; i++) {
+      this.px[i] -= (this.x[i] - cx) * strength;
+      this.py[i] += (this.y[i] - cy) * strength;
+    }
+  }
+
   kick(strength) {
-    if (this.fixed) return;
     const cx = this.centroidX();
     const cy = this.centroidY();
     for (let i = 0; i < this.n; i++) {
@@ -302,7 +348,48 @@ class World {
     this.grabOffsetY = y - blob.centroidY();
     this.grabX = x;
     this.grabY = y;
+    // A pinned jelly stretches instead: the side facing the way the finger goes follows it.
+    this.grabStartX = x;
+    this.grabStartY = y;
+    this.grabIndex = -1;
     this.wake();
+  }
+
+  /** Pulls one side of a pinned jelly after the finger, by up to most of its size; the pin holds the rest. */
+  stretch(b) {
+    const fx = this.grabX - this.grabStartX;
+    const fy = this.grabY - this.grabStartY;
+    const d = Math.hypot(fx, fy);
+    const r = Math.sqrt(b.targetArea / Math.PI);
+    if (this.grabIndex < 0) {
+      if (d < 3) return;
+      const cx = b.centroidX();
+      const cy = b.centroidY();
+      let best = -Infinity;
+      for (let i = 0; i < b.n; i++) {
+        const dot = (b.x[i] - cx) * fx + (b.y[i] - cy) * fy;
+        if (dot > best) {
+          best = dot;
+          this.grabIndex = i;
+        }
+      }
+      // Where that side sits when the jelly is round and at its spot.
+      const ox = b.x[this.grabIndex] - cx;
+      const oy = b.y[this.grabIndex] - cy;
+      const len = Math.hypot(ox, oy) || 1;
+      this.grabRestX = b.homeX + (ox / len) * r;
+      this.grabRestY = b.homeY + (oy / len) * r;
+    }
+    const reach = 0.9 * r;
+    const k = d > reach ? reach / d : 1;
+    const gx = this.grabRestX + fx * k - b.x[this.grabIndex];
+    const gy = this.grabRestY + fy * k - b.y[this.grabIndex];
+    for (let o = -3; o <= 3; o++) {
+      const w = STRETCH[Math.abs(o)] * 0.12;
+      const i = (this.grabIndex + o + b.n) % b.n;
+      b.x[i] += gx * w;
+      b.y[i] += gy * w;
+    }
   }
 
   release() {
@@ -321,7 +408,8 @@ class World {
 
   step(gravity) {
     const blobs = [...this.blobs.values()];
-    for (const b of blobs) b.integrate(gravity, 0.985);
+    // Pinned jellies hang on their pins: no falling, and they settle a little sooner.
+    for (const b of blobs) b.integrate(b.fixed ? 0 : gravity, b.fixed ? PIN_DAMPING : 0.985);
     for (const b of blobs) {
       if (b.passing) {
         b.updateBounds();
@@ -331,10 +419,15 @@ class World {
     for (let it = 0; it < 8; it++) {
       for (const b of blobs) {
         b.solveShape();
+        if (b.fixed) b.holdHome();
         if (b.key === this.grabKey) {
-          const cx = b.centroidX();
-          const cy = b.centroidY();
-          b.push((this.grabX - this.grabOffsetX - cx) * 0.18, (this.grabY - this.grabOffsetY - cy) * 0.18);
+          if (b.fixed) {
+            this.stretch(b);
+          } else {
+            const cx = b.centroidX();
+            const cy = b.centroidY();
+            b.push((this.grabX - this.grabOffsetX - cx) * 0.18, (this.grabY - this.grabOffsetY - cy) * 0.18);
+          }
         }
       }
       for (const b of blobs) b.updateBounds();
@@ -346,12 +439,13 @@ class World {
     this.restFrames = energy < REST_ENERGY ? this.restFrames + 1 : 0;
     this.frames++;
     if (this.frames % QUIET_FRAMES === 0) {
-      const snapshot = new Map(blobs.map((b) => [b.key, [b.centroidX(), b.centroidY()]]));
+      // A pinned jelly's middle hardly moves, so its width and height have to settle too.
+      const snapshot = new Map(blobs.map((b) => [b.key, [b.centroidX(), b.centroidY(), b.fixed ? b.maxX - b.minX : 0, b.fixed ? b.maxY - b.minY : 0]]));
       if (this.snapshot) {
         let drift = 0;
-        for (const [key, [x, y]] of snapshot) {
+        for (const [key, [x, y, w, h]] of snapshot) {
           const before = this.snapshot.get(key);
-          drift = Math.max(drift, before ? Math.hypot(x - before[0], y - before[1]) : Infinity);
+          drift = Math.max(drift, before ? Math.max(Math.hypot(x - before[0], y - before[1]), Math.abs(w - before[2]), Math.abs(h - before[3])) : Infinity);
         }
         this.quiet = drift < QUIET_DRIFT ? this.quiet + 1 : 0;
       }
@@ -421,8 +515,8 @@ class World {
           }
           const dx = bx - qx;
           const dy = by - qy;
-          // A pinned jelly does not give way: the other one takes the whole push.
-          const share = b.fixed ? 1 : a.fixed ? 0 : 0.5;
+          // A pinned jelly hardly gives way: the other one takes most of the push.
+          const share = b.fixed ? 0.85 : a.fixed ? 0.15 : 0.5;
           const back = 1 - share;
           a.x[i] += dx * share;
           a.y[i] += dy * share;
@@ -462,6 +556,13 @@ function blobBounds(blob) {
     maxY = Math.max(maxY, blob.y[i]);
   }
   return { minX, minY, maxX, maxY };
+}
+
+/** Where in its swing a pinned jelly starts, so that two side by side do not swing together. */
+function swayPhase(key) {
+  let n = 0;
+  for (let i = 0; i < key.length; i++) n = (n * 31 + key.charCodeAt(i)) % 6283;
+  return n / 1000;
 }
 
 /** A little push pin stuck into the top of a pinned jelly. */
@@ -678,6 +779,7 @@ export class JellyBox {
     this.ctx = this.canvas.getContext('2d');
 
     this.frame = this.frame.bind(this);
+    this.run = this.run.bind(this);
     this.onDown = this.onDown.bind(this);
     this.onMove = this.onMove.bind(this);
     this.onUp = this.onUp.bind(this);
@@ -704,6 +806,8 @@ export class JellyBox {
 
   setOptions(options) {
     Object.assign(this.options, options);
+    // Swaying may have just been switched on while everything is still.
+    if (this.swaying()) this.run();
   }
 
   /** Shows these jellies. New ones fall in from above, removed ones vanish, the rest stay put. */
@@ -726,6 +830,7 @@ export class JellyBox {
     liveBoxes.delete(this);
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+    clearTimeout(this.idle);
     clearTimeout(this.gesture?.holdTimer);
     clearTimeout(this.pendingTap?.timer);
     this.resizer.disconnect();
@@ -833,10 +938,16 @@ export class JellyBox {
       const blob = this.world.blobs.get(it.key);
       if (!blob) {
         this.world.add(it.key, area, cx, cy, true);
+        // A little wobble as it is pinned up.
+        if (!this.reduced) this.world.blobs.get(it.key).squish(0.012);
         changed = true;
       } else {
-        if (Math.abs(blob.targetArea - area) > 1) blob.resize(area);
-        blob.placeAt(cx, cy);
+        const resized = Math.abs(blob.targetArea - area) > 1;
+        if (resized) blob.resize(area);
+        if (resized || Math.abs(blob.homeX - cx) > 0.5 || Math.abs(blob.homeY - cy) > 0.5) {
+          blob.placeAt(cx, cy);
+          changed = true;
+        }
       }
     });
     let spawnY = -16;
@@ -859,16 +970,30 @@ export class JellyBox {
 
   wake() {
     this.world.wake();
-    if (!this.raf && !this.destroyed) {
-      this.last = 0;
-      this.raf = requestAnimationFrame(this.frame);
-    }
+    this.run();
+  }
+
+  run() {
+    if (this.raf || this.destroyed) return;
+    clearTimeout(this.idle);
+    this.idle = 0;
+    this.last = 0;
+    this.raf = requestAnimationFrame(this.frame);
+  }
+
+  /** Pinned jellies sway on their pins even when everything else is still (not when motion is reduced). */
+  swaying() {
+    if (this.reduced || this.options.sway === false) return false;
+    for (const b of this.world.blobs.values()) if (b.fixed) return true;
+    return false;
   }
 
   frame(t) {
     this.raf = 0;
     if (this.destroyed) return;
-    if (this.reduced && this.world.grabKey == null) {
+    if (this.world.isResting) {
+      // Only swaying: nothing to work out, just draw.
+    } else if (this.reduced && this.world.grabKey == null) {
       // No falling and wobbling: settle at once and show the packed box.
       for (let i = 0; i < 1500 && !this.world.isResting; i++) this.world.step(GRAVITY);
     } else {
@@ -885,6 +1010,7 @@ export class JellyBox {
     }
     this.draw();
     if (!this.world.isResting || this.bursting()) this.raf = requestAnimationFrame(this.frame);
+    else if (this.swaying()) this.idle = setTimeout(this.run, SWAY_MS);
   }
 
   /** How much the jelly [key] glitters, from 0 to 1: a hint that it is about to turn to gold. */
@@ -913,9 +1039,24 @@ export class JellyBox {
     ctx.clearRect(0, 0, this.w, this.h);
     // Pinned jellies are drawn last, on top of the ones falling in behind them.
     const blobs = [...this.world.blobs.values()].sort((a, b) => a.fixed - b.fixed);
+    const sway = this.swaying();
+    const seconds = performance.now() / 1000;
     for (const blob of blobs) {
       const item = this.byKey.get(blob.key);
       if (!item) continue;
+      const hang = sway && blob.fixed;
+      if (hang) {
+        // Swings a little from side to side around its pin, and bobs.
+        const pinX = blob.pinX();
+        const pinY = blob.pinY();
+        const phase = swayPhase(blob.key);
+        const bob = 1 + 0.02 * Math.sin(seconds * 3.3 + phase * 1.7);
+        ctx.save();
+        ctx.translate(pinX, pinY);
+        ctx.rotate(0.04 * Math.sin(seconds * 1.9 + phase));
+        ctx.scale(1 / Math.sqrt(bob), bob);
+        ctx.translate(-pinX, -pinY);
+      }
       const gold = item.gold || item.flavor === GOLDEN_FLAVOR;
       const flavor = gold ? GOLDEN_FLAVOR : item.flavor;
       tracePath(ctx, blob);
@@ -954,7 +1095,8 @@ export class JellyBox {
         drawSparkles(ctx, blob, this.glitter.level, 2 + Math.round(this.glitter.level * 4), now);
       }
       if (this.burstKey === blob.key && this.bursting()) drawBurst(ctx, blob, (now - this.burstAt) / BURST_MS);
-      if (blob.fixed) drawPin(ctx, blob.centroidX(), blobBounds(blob).minY, 9);
+      if (blob.fixed) drawPin(ctx, blob.pinX(), blob.pinY(), 9);
+      if (hang) ctx.restore();
     }
   }
 
@@ -1033,7 +1175,8 @@ export class JellyBox {
       this.flushTap();
     }
     if (!this.reduced) {
-      blob.kick(-0.03);
+      if (blob.fixed) blob.squish(0.015);
+      else blob.kick(-0.03);
       this.wake();
     }
     g.holdTimer = setTimeout(() => {
@@ -1041,7 +1184,7 @@ export class JellyBox {
       g.held = true;
       this.buzz();
       const b = this.world.blobs.get(g.key);
-      if (b && !b.fixed) this.world.grab(b, g.x0, g.y0);
+      if (b) this.world.grab(b, g.x0, g.y0);
       this.wake();
     }, LONG_PRESS_MS);
   }
@@ -1054,7 +1197,7 @@ export class JellyBox {
       g.moved = true;
       clearTimeout(g.holdTimer);
       const b = this.world.blobs.get(g.key);
-      if (b && !b.fixed && this.world.grabKey !== g.key) this.world.grab(b, p.x, p.y);
+      if (b && this.world.grabKey !== g.key) this.world.grab(b, p.x, p.y);
     }
     if (this.world.grabKey === g.key) {
       this.world.grabX = p.x;
@@ -1080,9 +1223,9 @@ export class JellyBox {
       this.wake();
     }
     if (g.moved) {
-      // Squeezed and let go: one step towards the golden jelly (a pinned one cannot be squeezed).
+      // Squeezed and let go: one step towards the golden jelly.
       const grabbed = this.byKey.get(g.key);
-      if (grabbed && !this.world.blobs.get(g.key)?.fixed) this.options.onGrab?.(grabbed);
+      if (grabbed) this.options.onGrab?.(grabbed);
       return;
     }
     const item = this.byKey.get(g.key);
@@ -1124,7 +1267,9 @@ export class JellyBox {
   finish(item) {
     this.buzz();
     if (!this.reduced) {
-      this.world.blobs.get(item.key)?.kick(0.12);
+      const blob = this.world.blobs.get(item.key);
+      if (blob?.fixed) blob.squish(0.025);
+      else blob?.kick(0.12);
       this.wake();
     }
     this.options.onToggle(item);

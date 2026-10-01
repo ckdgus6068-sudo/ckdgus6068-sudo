@@ -81,6 +81,8 @@ class SharedHost(
     val weekStartsOnSunday: Boolean,
     /** The lettering picked in settings, so the page matches the rest of the app. */
     val font: FontChoice,
+    /** "말랑말랑 숨쉬기": pinned jellies sway in the page's box too. */
+    val idleWobble: Boolean,
     val actions: SharedHostActions,
 )
 
