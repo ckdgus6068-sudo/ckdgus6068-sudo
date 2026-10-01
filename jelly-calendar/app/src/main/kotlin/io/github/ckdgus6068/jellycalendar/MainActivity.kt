@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -351,6 +352,9 @@ class MainActivity : ComponentActivity() {
         web.settings.userAgentString = "${web.settings.userAgentString} JellyCalendarApp/${platform.appVersion}"
         web.setBackgroundColor(Color.TRANSPARENT)
         web.addJavascriptInterface(ShareBridge(), "JellyBridge")
+        // Without a chrome client a web view drops browser dialogs and confirm() answers "no". The page
+        // asks its questions itself, but an older copy of it still uses confirm().
+        web.webChromeClient = WebChromeClient()
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 if (request.url.host == SHARE_HOST) return false

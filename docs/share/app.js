@@ -223,6 +223,36 @@ function toast(text) {
   toastTimer = setTimeout(() => el.remove(), 2600);
 }
 
+let asking = null;
+
+/**
+ * Asks a yes-or-no question on the page itself. The app's web view shows no browser dialogs
+ * (a confirm there quietly answers "no"), so every "are you sure?" goes through this instead.
+ */
+function askYesNo(message, { yes = '네', no = '아니요', danger = false } = {}) {
+  asking?.(false);
+  return new Promise((resolve) => {
+    const scrim = h('div', { class: 'ask-scrim' });
+    const done = (answer) => {
+      if (asking !== done) return;
+      asking = null;
+      scrim.remove();
+      resolve(answer);
+    };
+    asking = done;
+    const noButton = h('button', { class: 'btn ghost', 'data-testid': 'ask-no', onClick: () => done(false) }, no);
+    scrim.append(
+      h('div', { class: 'ask', role: 'alertdialog', 'aria-modal': 'true', 'data-testid': 'ask', onClick: (e) => e.stopPropagation() },
+        h('p', { class: 'ask-text' }, message),
+        h('div', { class: 'ask-buttons' },
+          noButton,
+          h('button', { class: danger ? 'btn danger' : 'btn', 'data-testid': 'ask-yes', onClick: () => done(true) }, yes))));
+    scrim.addEventListener('click', () => done(false));
+    document.body.append(scrim);
+    noButton.focus({ preventScroll: true });
+  });
+}
+
 const appEl = () => document.getElementById('app');
 
 // ---------------------------------------------------------------- members
@@ -318,6 +348,7 @@ async function boot() {
     render();
   });
   window.addEventListener('popstate', () => {
+    asking?.(false);
     if (state.sheet) hideSheet();
   });
 
@@ -819,6 +850,8 @@ function rememberProfile(n, color) {
 const MAX_GROUPS = 5;
 /** spaceId → { id, space, members, jellies, unsubs }: every calendar this device is in, kept live. */
 const groups = new Map();
+// Calendars being left or deleted from this phone on purpose: their watchers keep quiet meanwhile.
+const leaving = new Set();
 
 function savedSpaces() {
   const list = readJson(saved.get('spaces'), null);
@@ -861,11 +894,13 @@ function watchGroup(id) {
   const g = { id, space: null, members: [], jellies: [], unsubs: [] };
   groups.set(id, g);
   const lost = (e) => {
+    if (leaving.has(id)) return;
     console.warn(e);
     // Let go by the owner, or the calendar is gone: this device stops using it.
     if (e?.code === 'permission-denied') forgetSpace('이 공유 달력에 더 이상 들어갈 수 없어요', id);
   };
   g.unsubs.push(store.watchSpace(id, (space) => {
+    if (leaving.has(id)) return;
     if (!space) return forgetSpace('공유 달력이 지워졌어요', id);
     if (space.locked) return forgetSpace('이 기기에 달력 열쇠가 없어요. 초대 코드를 다시 받아 주세요', id);
     g.space = space;
@@ -926,6 +961,20 @@ function openSpace(id) {
   watchGroup(id);
   syncCurrent(id);
   render();
+}
+
+/**
+ * Leaves or deletes the calendar [id] on purpose and lets go of it here with [message], so the person
+ * is not told "공유 달력이 지워졌어요" by its own watchers on the way out. Throws when [work] fails.
+ */
+async function goOut(id, work, message) {
+  leaving.add(id);
+  try {
+    await work();
+    forgetSpace(message, id);
+  } finally {
+    leaving.delete(id);
+  }
 }
 
 /** This device stops using the calendar [id] (after leaving it, deleting it, or being let go). */
@@ -1083,15 +1132,19 @@ function renderLegacy() {
         class: 'btn',
         'data-testid': 'clear-legacy',
         onClick: async (e) => {
-          if (!confirm(mine ? '예전 달력과 그 안의 젤리를 서버에서 지울까요?' : '예전 달력에서 나갈까요?')) return;
-          e.currentTarget.disabled = true;
-          try {
-            if (mine) await store.deleteSpace(state.spaceId);
-            else await store.removeMember(state.spaceId, state.uid);
-          } catch (err) {
+          const button = e.currentTarget;
+          const id = state.spaceId;
+          const sure = await askYesNo(mine ? '예전 달력과 그 안의 젤리를 서버에서 지울까요?' : '예전 달력에서 나갈까요?', {
+            yes: mine ? '지우기' : '나가기',
+            danger: true,
+          });
+          if (!sure) return;
+          button.disabled = true;
+          const message = mine ? '예전 달력을 지웠어요. 새 달력을 만들어 다시 초대해 주세요' : '예전 달력에서 나왔어요';
+          await goOut(id, () => (mine ? store.deleteSpace(id) : store.removeMember(id, state.uid)), message).catch((err) => {
             console.error(err);
-          }
-          forgetSpace(mine ? '예전 달력을 지웠어요. 새 달력을 만들어 다시 초대해 주세요' : '예전 달력에서 나왔어요');
+            forgetSpace(message, id);
+          });
         },
       }, mine ? '예전 달력 지우고 새로 시작' : '예전 달력에서 나가기')),
   );
@@ -2013,7 +2066,7 @@ function buildJellySheet() {
         class: 'btn danger block',
         style: { marginTop: '10px' },
         onClick: async () => {
-          if (!confirm('이 젤리를 지울까요? 달린 메모도 함께 지워져요.')) return;
+          if (!(await askYesNo('이 젤리를 지울까요? 달린 메모도 함께 지워져요.', { yes: '지우기', danger: true }))) return;
           s.deleting = true;
           try {
             await store.deleteJelly(state.spaceId, s.id);
@@ -2154,7 +2207,11 @@ function buildMenuSheet() {
           class: 'chip remove-chip',
           'data-testid': 'remove',
           onClick: async () => {
-            if (!confirm(`${m.name || '이 사람'}님을 이 달력에서 내보낼까요? 다시 들어오려면 새 초대 코드가 필요해요.`)) return;
+            const sure = await askYesNo(`${m.name || '이 사람'}님을 이 달력에서 내보낼까요? 다시 들어오려면 새 초대 코드가 필요해요.`, {
+              yes: '내보내기',
+              danger: true,
+            });
+            if (!sure) return;
             try {
               await store.removeMember(state.spaceId, m.uid);
               toast(`${m.name || '그 사람'}님을 내보냈어요`);
@@ -2181,20 +2238,20 @@ function buildMenuSheet() {
         class: 'btn danger block',
         'data-testid': 'leave',
         onClick: async (e) => {
-          const ask = alone
+          const button = e.currentTarget;
+          const id = state.spaceId;
+          const question = alone
             ? '마지막 한 사람이라 나가면 이 달력과 그 안의 젤리, 메모가 모두 지워져요. 나갈까요?'
             : `이 달력에서 나갈까요? 다시 들어오려면 초대 코드가 필요해요.${iOwn ? ' 달력은 가장 먼저 들어온 사람에게 넘어가요.' : ''}`;
-          if (!confirm(ask)) return;
-          e.currentTarget.disabled = true;
+          if (!(await askYesNo(question, { yes: '나가기', danger: true }))) return;
+          button.disabled = true;
           try {
-            await store.leave(state.spaceId);
+            await goOut(id, () => store.leave(id), alone ? '달력을 지우고 나왔어요' : '달력에서 나왔어요');
           } catch (err) {
             console.error(err);
             toast('나가지 못했어요. 인터넷 연결을 확인해 주세요');
-            e.currentTarget.disabled = false;
-            return;
+            button.disabled = false;
           }
-          forgetSpace(alone ? '달력을 지우고 나왔어요' : '달력에서 나왔어요');
         },
       }, '이 달력에서 나가기'),
       iOwn && !alone
@@ -2202,17 +2259,21 @@ function buildMenuSheet() {
             class: 'btn danger block',
             'data-testid': 'delete-space',
             onClick: async (e) => {
-              if (!confirm('이 달력과 그 안의 젤리, 메모를 모든 사람에게서 지울까요? 되돌릴 수 없어요.')) return;
-              e.currentTarget.disabled = true;
+              const button = e.currentTarget;
+              const id = state.spaceId;
+              const sure = await askYesNo('이 달력과 그 안의 젤리, 메모를 모든 사람에게서 지울까요? 되돌릴 수 없어요.', {
+                yes: '지우기',
+                danger: true,
+              });
+              if (!sure) return;
+              button.disabled = true;
               try {
-                await store.deleteSpace(state.spaceId);
+                await goOut(id, () => store.deleteSpace(id), '달력을 지웠어요');
               } catch (err) {
                 console.error(err);
                 toast('지우지 못했어요. 인터넷 연결을 확인해 주세요');
-                e.currentTarget.disabled = false;
-                return;
+                button.disabled = false;
               }
-              forgetSpace('달력을 지웠어요');
             },
           }, '달력 지우기 (모든 사람에게서)')
         : null),
@@ -2406,7 +2467,7 @@ async function signOutHere() {
   const warn = who?.kind === 'google' && !saved.get('vault')
     ? '로그아웃할까요? 열쇠 비밀번호를 정하지 않아서, 다시 로그인하면 함께 쓰는 사람에게 초대 코드를 받아야 달력이 열려요.'
     : '로그아웃할까요? 이 휴대폰에서 공유 달력이 닫혀요. 다시 로그인하면 그대로 열려요.';
-  if (!confirm(warn)) return;
+  if (!(await askYesNo(warn, { yes: '로그아웃' }))) return;
   clearTimeout(vaultTimer);
   closeSheet();
   clearDevice();
@@ -2511,7 +2572,10 @@ function buildDeleteAccountSheet() {
         button.disabled = true;
         try {
           if (pw) await store.confirmPassword(pw.value);
-          for (const id of savedSpaces()) await store.leave(id).catch((err) => console.warn(err));
+          for (const id of savedSpaces()) {
+            leaving.add(id);
+            await store.leave(id).catch((err) => console.warn(err));
+          }
           await store.deleteAccount();
         } catch (err) {
           console.error(err);

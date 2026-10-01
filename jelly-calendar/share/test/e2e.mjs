@@ -68,7 +68,7 @@ const b = await iphone.newPage();
 for (const [name, page] of [['galaxy', a], ['iphone', b]]) {
   page.on('pageerror', (e) => console.error(`[${name}] page error`, e));
   page.on('console', (m) => m.type() === 'error' && console.error(`[${name}]`, m.text()));
-  page.on('dialog', (d) => d.accept());
+  page.on('dialog', (d) => noBrowserDialog(d));
   page.on('requestfailed', (r) => console.error(`[${name}] request failed ${r.url()} ${r.failure()?.errorText}`));
 }
 
@@ -76,6 +76,11 @@ let failures = 0;
 function check(ok, what) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`);
   if (!ok) failures++;
+}
+// Inside the app a browser dialog quietly answers "no", so the page must ask on the page itself.
+function noBrowserDialog(dialog) {
+  check(false, `asks on the page, not with a browser dialog: ${dialog.message()}`);
+  dialog.dismiss().catch(() => {});
 }
 const shot = (page, name) => page.screenshot({ path: `${OUT}${name}.png`, fullPage: true });
 const tid = (page, id) => page.locator(`[data-testid="${id}"]`);
@@ -355,7 +360,7 @@ try {
   });
   const c = await phone.newPage();
   c.on('pageerror', (e) => console.error('[new phone] page error', e));
-  c.on('dialog', (d) => d.accept());
+  c.on('dialog', (d) => noBrowserDialog(d));
   await c.goto(BASE);
   await tid(c, 'account-id').fill('changhyun');
   await tid(c, 'account-password').fill('wrong-password');
@@ -373,6 +378,13 @@ try {
   await c.goBack();
   await tid(c, 'menu').click();
   await tid(c, 'sign-out').click();
+  await tid(c, 'ask').waitFor();
+  await shot(c, '10e-sign-out-question');
+  await tid(c, 'ask-no').click();
+  await tid(c, 'ask').waitFor({ state: 'detached' });
+  check(await tid(c, 'sign-out').isVisible(), 'new phone: saying no to signing out keeps you signed in');
+  await tid(c, 'sign-out').click();
+  await tid(c, 'ask-yes').click();
   await tid(c, 'account-step').waitFor();
   check(await c.evaluate(() => !Object.keys(localStorage).some((k) => k.startsWith('jellyShare.key.'))), 'new phone: signing out leaves no calendar keys behind');
   await phone.close();
@@ -520,7 +532,7 @@ try {
     });
     const page = await context.newPage();
     page.on('pageerror', (e) => console.error('[google phone] page error', e));
-    page.on('dialog', (d) => d.accept());
+    page.on('dialog', (d) => noBrowserDialog(d));
     await page.addInitScript(() => {
       const token = JSON.stringify({ sub: 'google-user-1', email: 'jelly.friend@example.com', email_verified: true });
       window.JellyBridge = {
@@ -559,6 +571,11 @@ try {
   await tid(g2.page, 'vault-open').click();
   await tid(g2.page, 'month').waitFor({ timeout: 15000 });
   check(true, 'google: the vault password opens the calendar on a new phone');
+  await tid(g2.page, 'menu').click();
+  await tid(g2.page, 'leave').click();
+  await tid(g2.page, 'ask-yes').click();
+  await g2.page.locator('.toast', { hasText: '달력을 지우고 나왔어요' }).waitFor({ timeout: 15000 });
+  check(true, 'google: leaving asks on the page, and the last one out takes the calendar along');
   await g2.context.close();
 } catch (e) {
   console.error(e);

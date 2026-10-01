@@ -30,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.github.ckdgus6068.jellycalendar.core.ALL_DAYS
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyCodec
@@ -67,19 +66,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 enum class Screen { CALENDAR, ROUTINES, SETTINGS, GUIDE }
-
-/** The routine laid down on first launch: the morning run from the original idea. */
-fun sampleRoutine(today: LocalDate, id: String): Routine = Routine(
-    id = id,
-    title = "아침 러닝",
-    flavor = 4,
-    durationMin = 50,
-    startMin = 6 * 60,
-    days = ALL_DAYS,
-    wakeAnchored = true,
-    carryOver = true,
-    since = today,
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,8 +121,6 @@ fun JellyCalendarApp(
     }
 
     LaunchedEffect(today, weekStart) {
-        // Start the sample tomorrow when this morning's run is already over.
-        store.seedIfNeeded { day, id -> sampleRoutine(if (nowMinute < 6 * 60) day else day.plusDays(1), id) }
         store.refresh(weekDays)
     }
     // A month on screen (my 달 view, or "모두" which shows the month around the day) needs its
