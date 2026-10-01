@@ -1137,16 +1137,29 @@ function shiftMonth(delta) {
     state.selected = isoDay(thisMonth ? now : state.month);
   }
   render();
+  toTop();
 }
 
 function goToday() {
   if (isAll()) {
     bridge?.showDay?.(todayIso());
+    toTop();
     return;
   }
   state.month = firstOfMonth(new Date());
   state.selected = todayIso();
   render();
+  toTop();
+}
+
+/**
+ * Back to the top of the page, where the month starts: after "오늘" or turning the month while
+ * scrolled down to the day's list, the page would otherwise stay down there.
+ */
+function toTop() {
+  if (window.scrollY <= 0) return;
+  const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: calm ? 'auto' : 'smooth' }));
 }
 
 /** "달력" or "상자": the shared tab and the app's "모두" tab each remember their own. */

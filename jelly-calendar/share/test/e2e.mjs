@@ -224,6 +224,24 @@ try {
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
   const firstWeekday = await b.locator('.weekdays div').first().textContent();
   check(firstWeekday === '일', 'iphone: weeks start on Sunday');
+
+  // Scrolled down to the day's list in another month, "오늘" brings back the top of this month.
+  const fullSize = b.viewportSize();
+  await b.setViewportSize({ width: fullSize.width, height: 520 });
+  await b.getByRole('button', { name: '다음 달' }).first().click();
+  await b.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await b.waitForTimeout(300);
+  const scrolledTo = await b.evaluate(() => window.scrollY);
+  await tid(b, 'today').click();
+  await b.waitForFunction(() => window.scrollY === 0, null, { timeout: 5000 }).catch(() => {});
+  const thisMonth = (await tid(b, 'month').textContent()).trim();
+  check(
+    scrolledTo > 0 && (await b.evaluate(() => window.scrollY)) === 0 && thisMonth.includes(`${Number(month.slice(5))}월`),
+    `iphone: "오늘" from another month, scrolled down (${scrolledTo}px), goes back to the top of ${thisMonth}`,
+  );
+  await b.setViewportSize(fullSize);
+  // The steps below look at the 10th again.
+  await b.locator(`[data-day="${month}-10"]`).click();
   const { holidayOn } = await import(`${DOCS}share/holidays.js`);
   const holidayIso = Array.from({ length: 31 }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`).find((iso) => holidayOn(iso));
   if (holidayIso) {

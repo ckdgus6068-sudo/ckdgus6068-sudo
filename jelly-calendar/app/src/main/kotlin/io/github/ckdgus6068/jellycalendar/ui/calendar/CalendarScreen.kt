@@ -3,6 +3,7 @@ package io.github.ckdgus6068.jellycalendar.ui.calendar
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -105,6 +106,7 @@ fun CalendarScreen(
     dayScroll: ScrollState,
     actions: CalendarActions,
     modifier: Modifier = Modifier,
+    monthScroll: ScrollState = rememberScrollState(),
     sharedSpace: @Composable (Modifier) -> Unit = {},
 ) {
     val today = now.toLocalDate()
@@ -203,6 +205,7 @@ fun CalendarScreen(
                         onToggleDone = { actions.toggleDone(it) },
                         onSwipe = { actions.shift(it) },
                         modifier = Modifier.fillMaxSize(),
+                        scroll = monthScroll,
                     )
                     else -> {
                         val scroll = if (compact) weekScroll else dayScroll

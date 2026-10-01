@@ -104,6 +104,8 @@ fun JellyCalendarApp(
     drag.today = today
     val weekScroll = rememberScrollState()
     val dayScroll = rememberScrollState()
+    // The month view scrolls down to the chosen day's list; "오늘" and a new month bring its top back.
+    val monthScroll = rememberScrollState()
     var editor by remember { mutableStateOf<EditorState?>(null) }
     var placing by remember { mutableStateOf<Placing?>(null) }
     var placingOther by remember { mutableStateOf(false) }
@@ -294,10 +296,12 @@ fun JellyCalendarApp(
                 space == Space.MINE && mode == ViewMode.MONTH -> selected.plusMonths(direction.toLong()).toEpochDay()
                 else -> selectedDay + direction
             }
+            if (space == Space.MINE && mode == ViewMode.MONTH) scope.launch { monthScroll.animateScrollTo(0) }
         }
 
         override fun goToday() {
             selectedDay = today.toEpochDay()
+            scope.launch { monthScroll.animateScrollTo(0) }
         }
 
         override fun open(jelly: Jelly) {
@@ -434,6 +438,7 @@ fun JellyCalendarApp(
                         drag = drag,
                         weekScroll = weekScroll,
                         dayScroll = dayScroll,
+                        monthScroll = monthScroll,
                         actions = actions,
                         sharedSpace = { platform.SharedSpace(it, host) },
                     )

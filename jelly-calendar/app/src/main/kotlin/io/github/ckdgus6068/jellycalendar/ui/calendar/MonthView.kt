@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,12 +83,13 @@ fun MonthView(
     onToggleDone: (Jelly) -> Unit,
     onSwipe: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    scroll: ScrollState = rememberScrollState(),
 ) {
     val colors = LocalJellyColors.current
     val sundayFirst = data.settings.weekStartsOnSunday
     val days = remember(selected.year, selected.monthValue, sundayFirst) { Planner.monthGrid(selected, sundayFirst) }
     val swipe by rememberUpdatedState(onSwipe)
-    Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 8.dp)) {
+    Column(modifier.verticalScroll(scroll).padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp)) {
             for (date in days.take(7)) {
                 Text(
