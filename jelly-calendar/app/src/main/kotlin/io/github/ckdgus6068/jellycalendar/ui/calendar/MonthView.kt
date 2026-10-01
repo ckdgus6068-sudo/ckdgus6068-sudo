@@ -20,7 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +47,7 @@ import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyStatus
 import io.github.ckdgus6068.jellycalendar.core.KoreanHolidays
 import io.github.ckdgus6068.jellycalendar.core.Planner
+import io.github.ckdgus6068.jellycalendar.ui.common.JellyButton
 import io.github.ckdgus6068.jellycalendar.ui.common.clickableNoRipple
 import io.github.ckdgus6068.jellycalendar.ui.common.squishyClick
 import io.github.ckdgus6068.jellycalendar.ui.dateTitle
@@ -69,9 +73,11 @@ internal fun monthOrder(jellies: List<Jelly>): List<Jelly> =
 
 /**
  * A month of the phone's own jellies: six weeks of days with up to three unfinished jellies each,
- * and the chosen day's jellies below. Swipe sideways for another month; tray jellies can be
- * dropped on a day.
+ * and the chosen day's jellies below. A tapped day's jellies also come up at once in a sheet (the
+ * list below is often under the fold), with [onAdd] for a new one on that day. Swipe sideways for
+ * another month; tray jellies can be dropped on a day.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonthView(
     data: AppData,
@@ -84,11 +90,14 @@ fun MonthView(
     onSwipe: (Int) -> Unit,
     modifier: Modifier = Modifier,
     scroll: ScrollState = rememberScrollState(),
+    onAdd: (LocalDate) -> Unit = {},
 ) {
     val colors = LocalJellyColors.current
     val sundayFirst = data.settings.weekStartsOnSunday
     val days = remember(selected.year, selected.monthValue, sundayFirst) { Planner.monthGrid(selected, sundayFirst) }
     val swipe by rememberUpdatedState(onSwipe)
+    // The day whose sheet is up (as an epoch day, so it survives turning the phone).
+    var sheetDay by rememberSaveable { mutableStateOf<Long?>(null) }
     Column(modifier.verticalScroll(scroll).padding(horizontal = 8.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 4.dp)) {
             for (date in days.take(7)) {
@@ -127,7 +136,10 @@ fun MonthView(
                             selected = selected,
                             jellies = monthOrder(Planner.scheduledOn(data, date).filter { it.status != JellyStatus.MISSED }),
                             drag = drag,
-                            onPick = onPick,
+                            onPick = {
+                                onPick(it)
+                                sheetDay = it.toEpochDay()
+                            },
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -142,6 +154,38 @@ fun MonthView(
             onToggleDone = onToggleDone,
             modifier = Modifier.padding(top = 14.dp, bottom = 12.dp),
         )
+    }
+
+    sheetDay?.let { epoch ->
+        val date = LocalDate.ofEpochDay(epoch)
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { sheetDay = null },
+            sheetState = sheetState,
+            containerColor = colors.surface,
+        ) {
+            // A jelly opened from here comes up on top; closing it comes back to this day.
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 20.dp),
+            ) {
+                DayList(
+                    date = date,
+                    today = today,
+                    jellies = monthOrder(Planner.scheduledOn(data, date).filter { it.status != JellyStatus.MISSED }),
+                    onOpen = onOpen,
+                    onToggleDone = onToggleDone,
+                    inSheet = true,
+                )
+                JellyButton(
+                    "＋ 이 날에 젤리 담기",
+                    onClick = { onAdd(date) },
+                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                )
+            }
+        }
     }
 }
 
@@ -235,7 +279,10 @@ private fun MonthCell(
     }
 }
 
-/** The chosen day's jellies as cards; finished ones are folded away at the end. */
+/**
+ * The chosen day's jellies as cards; finished ones are folded away at the end. [inSheet]: in the
+ * day's sheet, where the button to add one is below.
+ */
 @Composable
 internal fun DayList(
     date: LocalDate,
@@ -244,6 +291,7 @@ internal fun DayList(
     onOpen: (Jelly) -> Unit,
     onToggleDone: (Jelly) -> Unit,
     modifier: Modifier = Modifier,
+    inSheet: Boolean = false,
 ) {
     val colors = LocalJellyColors.current
     val type = LocalJellyType.current
@@ -273,7 +321,13 @@ internal fun DayList(
         }
         if (jellies.isEmpty()) {
             Text(
-                keepWords("이 날은 아직 말랑하게 비어 있어요. 아래 ＋ 로 젤리를 담아 보세요."),
+                keepWords(
+                    if (inSheet) {
+                        "이 날은 아직 말랑하게 비어 있어요. 아래 버튼으로 젤리를 담아 보세요."
+                    } else {
+                        "이 날은 아직 말랑하게 비어 있어요. 아래 ＋ 로 젤리를 담아 보세요."
+                    },
+                ),
                 color = colors.textSub,
                 fontSize = 13.sp,
                 modifier = Modifier

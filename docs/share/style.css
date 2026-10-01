@@ -534,6 +534,15 @@ body.fill .box-bar .bottom-bar {
   margin-top: 16px;
 }
 
+/* A tapped day's jellies, in a sheet. */
+.day-panel.in-sheet {
+  margin-top: 0;
+}
+
+.day-add {
+  margin-top: 14px;
+}
+
 .day-head {
   display: flex;
   align-items: center;

@@ -84,6 +84,18 @@ function noBrowserDialog(dialog) {
 }
 const shot = (page, name) => page.screenshot({ path: `${OUT}${name}.png`, fullPage: true });
 const tid = (page, id) => page.locator(`[data-testid="${id}"]`);
+// A tapped day opens its sheet at once; the cards and the fold are looked for inside it.
+const daySheet = (page) => tid(page, 'day-sheet');
+const sheetCards = (page, hasText) => daySheet(page).locator('[data-testid="card"]', hasText ? { hasText } : undefined);
+const openDay = async (page, iso) => {
+  await page.locator(`[data-day="${iso}"]`).click();
+  await daySheet(page).waitFor();
+};
+// Back to the month: a jelly opened on a day's sheet goes back to the day first, then the month.
+const backToMonth = async (page) => {
+  for (let i = 0; i < 4 && (await page.evaluate(() => !!history.state?.sheet)); i++) await page.goBack();
+  await page.locator('.sheet').waitFor({ state: 'detached' });
+};
 
 try {
   // 1. Galaxy (창현) makes an account, the shared calendar and an invite.
@@ -143,22 +155,25 @@ try {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const day = `${month}-10`;
-  await a.locator(`[data-day="${day}"]`).click();
-  await tid(a, 'add').click();
+  await openDay(a, day);
+  check((await daySheet(a).textContent()).includes('비어 있어요'), 'galaxy: a tapped day opens its jellies at once (none yet)');
+  await tid(a, 'day-add').click();
   await tid(a, 'title').fill('저녁 약속');
   await tid(a, 'time').fill('19:00');
   await tid(a, 'post').click();
   await tid(a, 'memos').waitFor();
   await a.goBack();
-  await a.locator(`[data-day="${day}"]`).click();
+  await sheetCards(a, '저녁 약속').waitFor();
+  check(true, 'galaxy: back from the new jelly, its day lists it');
+  await shot(a, '3-galaxy-day-sheet');
 
-  await b.locator(`[data-day="${day}"]`).click();
-  await b.locator('[data-testid="card"]', { hasText: '저녁 약속' }).waitFor({ timeout: 10000 });
+  await openDay(b, day);
+  await sheetCards(b, '저녁 약속').waitFor({ timeout: 10000 });
   check(true, 'iphone: sees the jelly the galaxy put up');
-  check((await b.locator('[data-testid="card"]').first().textContent()).includes('창현 올림'), 'iphone: shows who put it up');
+  check((await sheetCards(b).first().textContent()).includes('창현 올림'), 'iphone: shows who put it up');
 
   // 4. iPhone changes the time and the title, and leaves a memo.
-  await b.locator('[data-testid="card"]').first().click();
+  await sheetCards(b).first().click();
   await tid(b, 'title').fill('저녁 약속 (7시 반)');
   await tid(b, 'time').fill('19:30');
   await tid(b, 'time').dispatchEvent('change');
@@ -168,14 +183,17 @@ try {
   await b.waitForTimeout(1200);
   await shot(b, '4-iphone-sheet-memo');
   await b.goBack();
+  await sheetCards(b, '7시 반').waitFor();
+  check(true, 'iphone: back from the jelly, its day is there again');
+  await backToMonth(b);
 
-  // 5. Galaxy sees the edit and the memo right away.
-  await a.locator('[data-testid="card"]', { hasText: '7시 반' }).waitFor({ timeout: 10000 });
-  const cardText = await a.locator('[data-testid="card"]').first().textContent();
+  // 5. Galaxy sees the edit and the memo right away, on the day's sheet still open.
+  await sheetCards(a, '7시 반').waitFor({ timeout: 10000 });
+  const cardText = await sheetCards(a).first().textContent();
   check(cardText.includes('19:30'), 'galaxy: sees the new time');
   check(cardText.includes('지은 고침'), 'galaxy: sees who changed it');
   check(cardText.includes('메모 1'), 'galaxy: sees the memo count');
-  await a.locator('[data-testid="card"]').first().click();
+  await sheetCards(a).first().click();
   await a.locator('.memo', { hasText: '2번 출구' }).waitFor({ timeout: 10000 });
   check(true, 'galaxy: reads the memo');
   await tid(a, 'memo-input').fill('좋아요! 7시 반에 봐요');
@@ -184,7 +202,7 @@ try {
   await tid(a, 'done').click();
   await a.waitForTimeout(800);
   await shot(a, '5-galaxy-sheet');
-  await a.goBack();
+  await backToMonth(a);
 
   // 6. A few more jellies so the month looks lived in.
   const more = [
@@ -194,8 +212,8 @@ try {
     ['24', '주말 등산', '08:00', a],
   ];
   for (const [d, title, time, page] of more) {
-    await page.locator(`[data-day="${month}-${d}"]`).click();
-    await tid(page, 'add').click();
+    await openDay(page, `${month}-${d}`);
+    await tid(page, 'day-add').click();
     await tid(page, 'title').fill(title);
     if (time) await tid(page, 'time').fill(time);
     if (title === '주말 등산') {
@@ -206,20 +224,25 @@ try {
     }
     await tid(page, 'post').click();
     await tid(page, 'memos').waitFor();
-    await page.goBack();
+    await backToMonth(page);
   }
-  await b.locator(`[data-day="${day}"]`).click();
+  await openDay(b, day);
   // Finished jellies leave the grid and fold away under the day.
-  await tid(b, 'done-fold').waitFor({ timeout: 10000 });
+  await daySheet(b).locator('[data-testid="done-fold"]').waitFor({ timeout: 10000 });
   check(!(await b.locator(`[data-day="${day}"] .mini`).count()), 'iphone: a finished jelly leaves the month grid');
-  await tid(b, 'done-fold').click();
-  await b.locator('[data-testid="card"].done').waitFor({ timeout: 10000 });
+  await daySheet(b).locator('[data-testid="done-fold"]').click();
+  await daySheet(b).locator('[data-testid="card"].done').waitFor({ timeout: 10000 });
   check(true, 'iphone: sees it marked done');
   await b.waitForTimeout(800);
-  await shot(b, '6-iphone-month');
-  await a.locator(`[data-day="${month}-17"]`).click();
+  await shot(b, '6-iphone-day-done');
+  await backToMonth(b);
+  await shot(b, '6b-iphone-month');
+  await openDay(a, `${month}-17`);
+  check((await sheetCards(a).count()) === 2, 'galaxy: the 17th\'s sheet lists both of its jellies');
   await a.waitForTimeout(800);
-  await shot(a, '7-galaxy-month');
+  await shot(a, '7-galaxy-day-17');
+  await backToMonth(a);
+  await shot(a, '7b-galaxy-month');
   const cells = await b.locator(`[data-day="${month}-17"] .mini`).count();
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
   const firstWeekday = await b.locator('.weekdays div').first().textContent();
@@ -229,8 +252,11 @@ try {
   const fullSize = b.viewportSize();
   await b.setViewportSize({ width: fullSize.width, height: 520 });
   await b.getByRole('button', { name: '다음 달' }).first().click();
+  // Turning the month glides back to its top; let that finish before scrolling down.
+  await b.waitForFunction(() => window.scrollY === 0, null, { timeout: 5000 }).catch(() => {});
+  await b.waitForTimeout(500);
   await b.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await b.waitForTimeout(300);
+  await b.waitForFunction(() => window.scrollY > 0, null, { timeout: 3000 }).catch(() => {});
   const scrolledTo = await b.evaluate(() => window.scrollY);
   await tid(b, 'today').click();
   await b.waitForFunction(() => window.scrollY === 0, null, { timeout: 5000 }).catch(() => {});
@@ -241,7 +267,8 @@ try {
   );
   await b.setViewportSize(fullSize);
   // The steps below look at the 10th again.
-  await b.locator(`[data-day="${month}-10"]`).click();
+  await openDay(b, `${month}-10`);
+  await backToMonth(b);
   const { holidayOn } = await import(`${DOCS}share/holidays.js`);
   const holidayIso = Array.from({ length: 31 }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`).find((iso) => holidayOn(iso));
   if (holidayIso) {
@@ -389,13 +416,13 @@ try {
   await tid(a, 'group-create').click();
   await a.waitForFunction(() => document.querySelector('[data-testid="groups"]')?.textContent.includes('재훈·준헌'));
   check(true, 'galaxy: makes a second shared calendar');
-  await a.locator(`[data-day="${month}-17"]`).click();
-  await tid(a, 'add').click();
+  await openDay(a, `${month}-17`);
+  await tid(a, 'day-add').click();
   await tid(a, 'title').fill('축구');
   await tid(a, 'time').fill('18:00');
   await tid(a, 'post').click();
   await tid(a, 'memos').waitFor();
-  await a.goBack();
+  await backToMonth(a);
   const only = await a.waitForFunction(
     (sel) => document.querySelectorAll(sel).length === 1 && document.querySelector(sel).textContent.includes('축구'),
     `[data-day="${month}-17"] .mini`,
@@ -556,6 +583,9 @@ try {
   await app.locator(`[data-day="${month}-24"]`).click();
   await called(app, 'showDay', `${month}-24`);
   check(true, 'all: a tapped day goes to the app');
+  await sheetCards(app, '주말 등산').waitFor();
+  check((await tid(app, 'day-add').textContent()).includes('넣기'), 'all: and its jellies come up at once, with a button to add one');
+  await backToMonth(app);
   await tid(app, 'view-box').click();
   await settled(app, 5);
 

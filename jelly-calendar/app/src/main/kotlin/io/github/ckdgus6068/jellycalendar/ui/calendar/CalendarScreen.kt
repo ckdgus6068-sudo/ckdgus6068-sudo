@@ -211,6 +211,7 @@ fun CalendarScreen(
                         onSwipe = { actions.shift(it) },
                         modifier = Modifier.fillMaxSize(),
                         scroll = monthScroll,
+                        onAdd = { actions.create(it, null) },
                     )
                     else -> {
                         val scroll = if (compact) weekScroll else dayScroll

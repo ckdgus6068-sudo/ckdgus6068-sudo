@@ -382,7 +382,9 @@ async function boot() {
   });
   window.addEventListener('popstate', () => {
     asking?.(false);
-    if (state.sheet) hideSheet();
+    if (!state.sheet) return;
+    if (state.sheet.under && history.state?.sheet) showUnder();
+    else hideSheet();
   });
 
   ready = true;
@@ -1213,6 +1215,12 @@ function jelliesOn(iso) {
 /** Draws whatever the page should show now. Safe to call often: box views are updated in place. */
 function render() {
   if (!ready) return;
+  renderScreen();
+  // An open day's sheet follows the changes too.
+  if (state.sheet?.kind === 'day') buildDaySheet();
+}
+
+function renderScreen() {
   if (isAll()) {
     if (state.allView === 'month') renderMonth();
     else renderAll();
@@ -1307,12 +1315,11 @@ function bottomBar() {
       h('span', { class: 'today-leaf' }, String(new Date().getDate())),
       h('span', null, '오늘')),
     h('div', { class: 'seg', role: 'tablist' }, tab('month', '달력'), tab('box', '상자')),
-    h('button', { class: 'jelly add-fab squish', vars: flavorVars(0), 'aria-label': '젤리 올리기', onClick: addJelly, 'data-testid': 'add' }, '+'));
+    h('button', { class: 'jelly add-fab squish', vars: flavorVars(0), 'aria-label': '젤리 올리기', onClick: () => addJelly(), 'data-testid': 'add' }, '+'));
 }
 
-/** "+": a shared jelly on the day shown; in "모두", first the choice between mine and shared. */
-function addJelly() {
-  const date = selectedDay();
+/** "+": a shared jelly on [date] (the day shown); in "모두", first the choice between mine and shared. */
+function addJelly(date = selectedDay()) {
   if (!date) return;
   if (!isAll()) openSheet({ kind: 'new', date });
   else if (shownGroups().length) openSheet({ kind: 'add', date });
@@ -1390,7 +1397,10 @@ function renderMonth() {
         class: ['day', d.getMonth() !== month.getMonth() && 'other', iso === today && 'today', iso === selected && 'selected']
           .filter(Boolean).join(' '),
         'data-day': iso,
-        onClick: () => pick(iso),
+        onClick: () => {
+          pick(iso);
+          openSheet({ kind: 'day', date: iso });
+        },
       },
         h('span', { class: 'day-top' },
           h('span', { class: `num${tone}` }, d.getDate()),
@@ -1416,8 +1426,11 @@ function renderMonth() {
   ].filter(Boolean));
 }
 
-/** The picked day under the month: its jellies to do, and the finished ones folded away. */
-function dayPanel(iso) {
+/**
+ * The picked day under the month, or in its sheet ([inSheet]): its jellies to do, and the finished
+ * ones folded away.
+ */
+function dayPanel(iso, inSheet = false) {
   const items = dayItems(iso);
   const open = items.filter((it) => !it.done);
   const done = items.filter((it) => it.done);
@@ -1426,7 +1439,7 @@ function dayPanel(iso) {
     ? `할 젤리 ${open.length}개${done.length ? ` · 다 먹은 젤리 ${done.length}개` : ''}`
     : '아직 비어 있어요';
   const toCard = (it, i) => (it.kind === 'shared' ? card(it.j, i, it.group) : personalCard(it.p, i));
-  return h('div', { class: 'day-panel' },
+  return h('div', { class: `day-panel${inSheet ? ' in-sheet' : ''}` },
     h('div', { class: 'day-head' },
       h('div', null,
         h('div', { class: 'day-title', 'data-testid': 'day-title' },
@@ -1438,7 +1451,9 @@ function dayPanel(iso) {
       ? h('div', { class: 'cards' }, open.map(toCard))
       : h('div', { class: 'empty' }, done.length
         ? '이 날 젤리를 다 먹었어요. 잘했어요!'
-        : '이 날은 아직 말랑하게 비어 있어요. 아래 ＋ 로 젤리를 올려 보세요.'),
+        : inSheet
+          ? '이 날은 아직 말랑하게 비어 있어요. 아래 버튼으로 젤리를 올려 보세요.'
+          : '이 날은 아직 말랑하게 비어 있어요. 아래 ＋ 로 젤리를 올려 보세요.'),
     done.length
       ? h('button', {
           class: 'done-fold',
@@ -1770,8 +1785,16 @@ function renderAll() {
 // ---------------------------------------------------------------- sheets
 
 function openSheet(sheet) {
+  if (state.sheet?.kind === 'day' && sheet.kind !== 'day') {
+    // Opened from a day's sheet (a jelly, or a new one): going back returns to the day.
+    sheet.under = state.sheet;
+    history.pushState({ sheet: true }, '');
+  } else if (!history.state?.sheet) {
+    history.pushState({ sheet: true }, '');
+  } else if (state.sheet?.under && !sheet.under) {
+    sheet.under = state.sheet.under;
+  }
   state.sheet = sheet;
-  if (!history.state?.sheet) history.pushState({ sheet: true }, '');
   buildSheet();
 }
 
@@ -1780,15 +1803,52 @@ function closeSheet() {
   else hideSheet();
 }
 
-function hideSheet() {
+/** Stops the live updates of the sheet on screen. */
+function dropSheetWatchers() {
   subs.memos?.();
   subs.memos = null;
   subs.jelly?.();
   subs.jelly = null;
-  state.sheet = null;
   state.memos = [];
+}
+
+function hideSheet() {
+  dropSheetWatchers();
+  state.sheet = null;
   document.querySelector('.scrim')?.remove();
   document.querySelector('.sheet')?.remove();
+}
+
+/** Back from a sheet opened on a day's sheet: that day's sheet again. */
+function showUnder() {
+  const under = state.sheet.under;
+  dropSheetWatchers();
+  state.sheet = under;
+  buildSheet();
+}
+
+/**
+ * A tapped day's jellies in a sheet, to open one or put up another: the list under the month is
+ * often off screen. Kept up to date while it is open (see render).
+ */
+function buildDaySheet() {
+  const iso = state.sheet.date;
+  const content = [
+    dayPanel(iso, true),
+    h('button', { class: 'btn block day-add', type: 'button', onClick: () => addJelly(iso), 'data-testid': 'day-add' },
+      isAll() ? '＋ 이 날에 젤리 넣기' : '＋ 이 날에 젤리 올리기'),
+  ];
+  const open = document.querySelector('.sheet[data-sheet="day"]');
+  if (open && open.dataset.date === iso) {
+    const top = open.scrollTop;
+    open.replaceChildren(h('div', { class: 'handle' }), ...content);
+    open.scrollTop = top;
+    return;
+  }
+  const sheet = sheetFrame(...content);
+  sheet.dataset.sheet = 'day';
+  sheet.dataset.date = iso;
+  sheet.setAttribute('data-testid', 'day-sheet');
 }
 
 function sheetFrame(...children) {
@@ -1804,6 +1864,7 @@ function buildSheet() {
   const s = state.sheet;
   if (!s) return;
   if (s.kind === 'jelly' || s.kind === 'new') buildJellySheet();
+  else if (s.kind === 'day') buildDaySheet();
   else if (s.kind === 'add') buildAddSheet();
   else if (s.kind === 'invite') buildInviteSheet();
   else if (s.kind === 'menu') buildMenuSheet();
@@ -2155,11 +2216,13 @@ function buildJellySheet() {
               toast('올리지 못했어요');
             }
           });
+          const under = state.sheet?.under;
           showDay(fields.date);
           state.sheet = {
             kind: 'jelly',
             id,
             seed: { ...fields, id, by: state.uid, byName: state.myName, updatedBy: state.uid, memoCount: 0, pending: true },
+            under,
           };
           buildSheet();
           toast(state.online ? '올렸어요. 함께 쓰는 사람 화면에도 바로 보여요' : '연결되면 바로 올라가요');
@@ -2469,6 +2532,7 @@ function fontPicker() {
 }
 
 function openReplace(sheet) {
+  if (state.sheet?.under && !sheet.under) sheet.under = state.sheet.under;
   state.sheet = sheet;
   buildSheet();
 }
