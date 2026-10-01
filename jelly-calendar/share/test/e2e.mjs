@@ -180,6 +180,143 @@ try {
   await shot(a, '7-galaxy-month');
   const cells = await b.locator(`[data-day="${month}-17"] .mini`).count();
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
+
+  // 7. The shared box: the 17th as a box of soft jellies.
+  const box = (page) => page.evaluate(() => window.__jellyBox?.centers() ?? []);
+  const settled = (page, count) => page.waitForFunction(
+    (n) => window.__jellyBox?.resting && window.__jellyBox.centers().length === n,
+    count,
+    { timeout: 15000 },
+  );
+  await tid(a, 'view-box').click();
+  await tid(a, 'day-head').waitFor();
+  await settled(a, 2);
+  check((await tid(a, 'day-head').textContent()).includes('17일'), 'galaxy box: opens on the selected day');
+  await a.waitForTimeout(600);
+  await shot(a, '8-galaxy-box');
+
+  // A double tap finishes a jelly, and the other phone sees it at once.
+  let blobs = await box(a);
+  const cake = blobs.find((c) => c.title === '케이크 찾기');
+  await a.mouse.dblclick(cake.x, cake.y);
+  await b.locator(`[data-day="${month}-17"] .mini.done`).waitFor({ timeout: 10000 });
+  check(true, 'iphone: sees the jelly finished in the galaxy box');
+
+  // A tap opens the jelly with its memos.
+  await settled(a, 2);
+  blobs = await box(a);
+  const birthday = blobs.find((c) => c.title === '부모님 생신');
+  await a.mouse.click(birthday.x, birthday.y);
+  await tid(a, 'memos').waitFor();
+  check((await tid(a, 'title').inputValue()) === '부모님 생신', 'galaxy box: a tap opens the jelly');
+  await a.goBack();
+
+  // Swiping an empty spot turns the day.
+  const area = await tid(a, 'box').boundingBox();
+  await a.mouse.move(area.x + area.width - 110, area.y + 110);
+  await a.mouse.down();
+  await a.mouse.move(area.x + 30, area.y + 120, { steps: 8 });
+  await a.mouse.up();
+  await a.waitForFunction(() => document.querySelector('[data-testid="day-head"]')?.textContent.includes('18일'));
+  check(true, 'galaxy box: a sideways swipe turns to the next day');
+
+  // The iPhone's box of the 10th, and its menu sheet at full height.
+  await tid(b, 'view-box').click();
+  await settled(b, 1);
+  await b.waitForTimeout(600);
+  await shot(b, '9-iphone-box');
+  await tid(b, 'menu').click();
+  await tid(b, 'invite').waitFor();
+  const sheet = await b.locator('.sheet').boundingBox();
+  check(sheet.height > 250, `iphone: the menu sheet opens at full height (${Math.round(sheet.height)}px)`);
+  await shot(b, '10-iphone-menu');
+  await b.goBack();
+
+  // 8. Inside the app's "모두" tab: the phone's own jellies and the shared ones in one box.
+  const app = await galaxy.newPage();
+  app.on('pageerror', (e) => console.error('[app] page error', e));
+  app.on('console', (m) => m.type() === 'error' && console.error('[app]', m.text()));
+  await app.addInitScript((date) => {
+    window.__calls = [];
+    window.__host = {
+      mode: 'all',
+      date,
+      doubleTap: true,
+      longPress: true,
+      personal: [
+        { id: 'p1', title: '헬스', start: 19 * 60, duration: 60, flavor: 3, done: false },
+        { id: 'p2', title: '보고서 작성', start: 14 * 60, duration: 90, flavor: 6, done: true },
+      ],
+    };
+    const call = (name) => (...args) => {
+      window.__calls.push([name, ...args]);
+    };
+    window.JellyBridge = {
+      hostState: () => JSON.stringify(window.__host),
+      share: call('share'),
+      openPersonal: call('openPersonal'),
+      togglePersonal: call('togglePersonal'),
+      createPersonal: call('createPersonal'),
+      shiftDay: call('shiftDay'),
+      showShared: call('showShared'),
+    };
+  }, `${month}-17`);
+  const called = (page, name, arg) => page.waitForFunction(
+    ([n, x]) => window.__calls.some((c) => c[0] === n && c[1] === x),
+    [name, arg],
+    { timeout: 5000 },
+  );
+  await app.goto(BASE);
+  await tid(app, 'legend').waitFor();
+  await settled(app, 4);
+  const legend = await tid(app, 'legend').textContent();
+  check(legend.includes('내 젤리 2') && legend.includes('공유 젤리 2'), 'all: my two jellies and two shared ones in one box');
+  await app.waitForTimeout(600);
+  await shot(app, '11-galaxy-all');
+
+  blobs = await box(app);
+  const gym = blobs.find((c) => c.title === '헬스');
+  await app.mouse.click(gym.x, gym.y);
+  await called(app, 'openPersonal', 'p1');
+  check(true, 'all: a tap on my own jelly opens it in the app');
+
+  await settled(app, 4);
+  blobs = await box(app);
+  const report = blobs.find((c) => c.title === '보고서 작성');
+  await app.mouse.dblclick(report.x, report.y);
+  await called(app, 'togglePersonal', 'p2');
+  check(true, 'all: a double tap on my own jelly finishes it in the app');
+
+  await settled(app, 4);
+  blobs = await box(app);
+  const shared = blobs.find((c) => c.title === '부모님 생신');
+  await app.mouse.click(shared.x, shared.y);
+  await tid(app, 'memos').waitFor();
+  check(true, 'all: a tap on a shared jelly opens it with its memos');
+  await app.goBack();
+
+  const room = await tid(app, 'box').boundingBox();
+  await app.mouse.move(room.x + 40, room.y + 110);
+  await app.mouse.down();
+  await app.mouse.move(room.x + room.width - 110, room.y + 120, { steps: 8 });
+  await app.mouse.up();
+  await called(app, 'shiftDay', -1);
+  check(true, 'all: a sideways swipe asks the app for the day before');
+
+  await app.evaluate((day) => {
+    window.__host = { ...window.__host, date: day, personal: [] };
+    window.jellyHost.poke();
+  }, day);
+  await settled(app, 1);
+  check((await tid(app, 'legend').textContent()).includes('공유 젤리 1'), 'all: follows the app to another day');
+
+  // "+" asks which kind of jelly; my own goes to the app's editor for the day now shown.
+  await tid(app, 'box-add').click();
+  await tid(app, 'add-shared').waitFor();
+  await shot(app, '12-galaxy-all-add');
+  await tid(app, 'add-personal').click();
+  await called(app, 'createPersonal', day);
+  check(true, 'all: + makes my own jelly in the app on the day shown');
 } catch (e) {
   console.error(e);
   failures++;

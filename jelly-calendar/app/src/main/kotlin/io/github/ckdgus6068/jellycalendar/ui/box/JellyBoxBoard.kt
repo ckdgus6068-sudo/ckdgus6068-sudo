@@ -198,6 +198,7 @@ fun JellyBoxBoard(
             }
             LaunchedEffect(world) {
                 val gravity = with(density) { 0.35.dp.toPx() }
+                world.quietDrift = with(density) { 0.8.dp.toPx() }
                 while (true) {
                     if (world.isResting) world.awaitWake()
                     withFrameNanos {

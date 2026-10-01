@@ -2,6 +2,7 @@ package io.github.ckdgus6068.jellycalendar.ui.box
 
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -154,6 +155,16 @@ class SoftBodyWorld {
     var restFrames = 0
         private set
 
+    /**
+     * A packed pile never stops trembling completely, so the world also rests once no jelly has
+     * moved more than [quietDrift] px over two windows of [QUIET_FRAMES] frames, and at the latest
+     * [MAX_FRAMES] frames after the last touch or change.
+     */
+    var quietDrift = 2f
+    private var frames = 0
+    private var quietWindows = 0
+    private var snapshot: Map<String, Pair<Float, Float>>? = null
+
     /** The held jelly follows the finger at ([grabX], [grabY]), keeping the offset it was grabbed at. */
     var grabId: String? = null
     var grabX = 0f
@@ -167,10 +178,14 @@ class SoftBodyWorld {
         width = w; height = h; pad = padding
     }
 
-    val isResting: Boolean get() = restFrames > 45 && grabId == null
+    val isResting: Boolean
+        get() = grabId == null && (restFrames > 45 || quietWindows >= 2 || frames > MAX_FRAMES)
 
     fun wake() {
         restFrames = 0
+        frames = 0
+        quietWindows = 0
+        snapshot = null
         wakeSignal.trySend(Unit)
     }
 
@@ -220,6 +235,19 @@ class SoftBodyWorld {
         var energy = 0f
         for (b in blobs.values) energy = max(energy, b.kinetic())
         restFrames = if (energy < 0.004f) restFrames + 1 else 0
+        frames++
+        if (frames % QUIET_FRAMES == 0) {
+            val now = blobs.mapValues { (_, b) -> b.centroidX() to b.centroidY() }
+            snapshot?.let { before ->
+                var drift = 0f
+                for ((id, at) in now) {
+                    val was = before[id]
+                    drift = if (was == null) Float.MAX_VALUE else max(drift, hypot(at.first - was.first, at.second - was.second))
+                }
+                quietWindows = if (drift < quietDrift) quietWindows + 1 else 0
+            }
+            snapshot = now
+        }
     }
 
     private fun walls() {
@@ -276,4 +304,9 @@ class SoftBodyWorld {
 
     /** Highest point of the pile, used to know how full the box is. */
     fun fillTop(): Float = blobs.values.minOfOrNull { it.minY } ?: height
+
+    private companion object {
+        const val QUIET_FRAMES = 30
+        const val MAX_FRAMES = 900
+    }
 }

@@ -1,6 +1,7 @@
 // 공유 젤리: a month of jellies shared by two (or a few) people, on iPhone, Android or any browser.
 import { firebaseConfig } from './config.js';
 import * as store from './store.js';
+import { JellyBox } from './box.js';
 
 // ---------------------------------------------------------------- look
 
@@ -43,8 +44,9 @@ const saved = {
 const inApp = /JellyCalendarApp/.test(navigator.userAgent);
 const isIos = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const standalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+// Inside the Android app: the app's side of the page (see MainActivity.ShareBridge).
+const bridge = window.JellyBridge || null;
 
-const today = isoDay(new Date());
 const state = {
   uid: null,
   myName: saved.get('name') || '',
@@ -53,12 +55,21 @@ const state = {
   members: [],
   jellies: [],
   month: firstOfMonth(new Date()),
-  selected: today,
-  sheet: null, // { kind: 'jelly' | 'new' | 'invite' | 'menu' | 'name', ... }
+  selected: todayIso(),
+  // The shared calendar as a month ('month') or as one day's box ('box').
+  view: saved.get('view') === 'box' ? 'box' : 'month',
+  // Set by the Android app: { mode: 'shared' } or { mode: 'all', date, personal, doubleTap, longPress }.
+  host: null,
+  sheet: null, // { kind: 'jelly' | 'new' | 'add' | 'invite' | 'menu' | 'name', ... }
   memos: [],
   online: navigator.onLine,
 };
 const subs = { space: null, members: null, jellies: null, jelly: null, memos: null };
+let ready = false;
+let screen = null; // what #app shows: 'welcome' | 'month' | 'shared-box' | 'all'
+let watchedMonth = null;
+let pendingCode = '';
+let testMode = false;
 
 // ---------------------------------------------------------------- dates
 
@@ -68,6 +79,10 @@ function pad(n) {
 
 function isoDay(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function todayIso() {
+  return isoDay(new Date());
 }
 
 function parseDay(s) {
@@ -200,9 +215,12 @@ function avatar(uid, fallback, small = false) {
 async function boot() {
   const params = new URLSearchParams(location.search);
   const emulator = params.has('emu') && ['localhost', '127.0.0.1'].includes(location.hostname);
+  testMode = emulator;
   const config = emulator
     ? { apiKey: 'demo-key', authDomain: 'localhost', projectId: 'demo-jelly', appId: 'demo-app' }
     : firebaseConfig;
+  readHost();
+  if (inApp) reportViewport();
   if (!config) {
     appEl().replaceChildren(
       h('div', { class: 'center' },
@@ -228,19 +246,20 @@ async function boot() {
 
   window.addEventListener('online', () => {
     state.online = true;
-    renderMain();
+    render();
   });
   window.addEventListener('offline', () => {
     state.online = false;
-    renderMain();
+    render();
   });
   window.addEventListener('popstate', () => {
     if (state.sheet) hideSheet();
   });
 
-  const code = codeFromLink();
+  ready = true;
+  pendingCode = codeFromLink();
   if (state.spaceId) openSpace(state.spaceId);
-  else renderWelcome(code);
+  else render();
 }
 
 /** "#c=ABCD2345" in the address, from an invite link. */
@@ -249,10 +268,58 @@ function codeFromLink() {
   return m ? store.cleanCode(m[1]) : '';
 }
 
+// ---------------------------------------------------------------- inside the Android app
+
+// The app tells the page what to show (the shared calendar, or everything on one day together with
+// the phone's own jellies) and pokes it when that changes; the page then asks for the details.
+window.jellyHost = {
+  poke() {
+    readHost();
+    render();
+  },
+};
+
+function readHost() {
+  let next = null;
+  try {
+    next = bridge?.hostState ? JSON.parse(bridge.hostState()) : null;
+  } catch (e) {
+    console.warn(e);
+  }
+  if (next && next.mode !== 'all') next = { ...next, mode: 'shared' };
+  if (next?.mode === 'all' && !/^\d{4}-\d{2}-\d{2}$/.test(next.date || '')) next = { ...next, mode: 'shared' };
+  const changedMode = (state.host?.mode || 'shared') !== (next?.mode || 'shared');
+  state.host = next;
+  // A sheet from one tab should not stay open over the other one.
+  if (changedMode && state.sheet) closeSheet();
+}
+
+function isAll() {
+  return state.host?.mode === 'all';
+}
+
+/** How the finishing gestures are set up in the app (both on in a browser). */
+function gestures() {
+  return { doubleTap: state.host?.doubleTap !== false, longPress: state.host?.longPress !== false };
+}
+
+/** One line in the app's log, so a broken viewport inside the app's web view shows up in tests. */
+function reportViewport() {
+  requestAnimationFrame(() => {
+    const probe = h('div', { style: { position: 'fixed', top: '0', left: '0', width: '1px', height: '100vh', visibility: 'hidden' } });
+    document.body.append(probe);
+    console.info(`jelly-share viewport ${innerWidth}x${innerHeight} vh100=${probe.getBoundingClientRect().height}`);
+    probe.remove();
+  });
+}
+
 // ---------------------------------------------------------------- welcome
 
 function renderWelcome(code = '') {
   closeSubs();
+  leaveBox();
+  screen = 'welcome';
+  document.body.classList.remove('fill');
   let busy = false;
   const name = h('input', {
     class: 'input',
@@ -357,6 +424,7 @@ function closeSubs() {
     subs[key]?.();
     subs[key] = null;
   }
+  watchedMonth = null;
 }
 
 function openSpace(id) {
@@ -365,61 +433,87 @@ function openSpace(id) {
   saved.set('space', id);
   // An invite code in the address is used up once we are in.
   if (location.hash) history.replaceState(history.state, '', location.pathname + location.search);
+  pendingCode = '';
 
   const lost = (e) => {
     console.warn(e);
-    if (e?.code === 'permission-denied') {
-      // Left the space, or the space is gone: start over.
-      saved.set('space', null);
-      state.spaceId = null;
-      renderWelcome();
-    }
+    // Left the space, or the space is gone: start over.
+    if (e?.code === 'permission-denied') forgetSpace();
   };
   subs.space = store.watchSpace(id, (space) => {
     state.space = space;
-    renderMain();
+    render();
   }, lost);
   subs.members = store.watchMembers(id, (members) => {
     state.members = members;
     const mine = members.find((m) => m.uid === state.uid);
     if (mine && mine.name !== state.myName) rememberName(mine.name);
-    renderMain();
+    render();
     state.sheet?.repaint?.();
   }, lost);
-  watchMonth();
-  renderMain();
+  render();
 }
 
-function watchMonth() {
+function forgetSpace() {
+  closeSubs();
+  saved.set('space', null);
+  state.spaceId = null;
+  state.space = null;
+  state.members = [];
+  state.jellies = [];
+  screen = null;
+  render();
+}
+
+/** Listens to the jellies of the six weeks around [month], unless that is already the case. */
+function ensureMonth(month) {
+  if (!state.spaceId) return;
+  const key = isoDay(month).slice(0, 7);
+  if (watchedMonth === key) return;
+  watchedMonth = key;
   subs.jellies?.();
-  const days = gridDays(state.month);
+  state.jellies = [];
+  const days = gridDays(month);
   subs.jellies = store.watchJellies(state.spaceId, isoDay(days[0]), isoDay(days[41]), (jellies) => {
     state.jellies = jellies;
-    renderMain();
+    render();
   }, (e) => console.warn(e));
 }
 
-/** Shows the month of an ISO day with that day selected. */
+/** Shows the month of an ISO day with that day selected. In the app's "모두" tab the app picks the day. */
 function showDay(iso) {
-  const d = parseDay(iso);
-  state.selected = iso;
-  if (d.getMonth() !== state.month.getMonth() || d.getFullYear() !== state.month.getFullYear()) {
-    state.month = firstOfMonth(d);
-    state.jellies = [];
-    watchMonth();
+  if (!isAll()) {
+    const d = parseDay(iso);
+    state.selected = iso;
+    if (d.getMonth() !== state.month.getMonth() || d.getFullYear() !== state.month.getFullYear()) {
+      state.month = firstOfMonth(d);
+    }
   }
-  renderMain();
+  render();
 }
 
 function shiftMonth(delta) {
   state.month = new Date(state.month.getFullYear(), state.month.getMonth() + delta, 1);
   const sel = parseDay(state.selected);
   if (sel.getMonth() !== state.month.getMonth() || sel.getFullYear() !== state.month.getFullYear()) {
-    state.selected = isoDay(state.month.getMonth() === new Date().getMonth() && state.month.getFullYear() === new Date().getFullYear() ? new Date() : state.month);
+    const now = new Date();
+    const thisMonth = state.month.getMonth() === now.getMonth() && state.month.getFullYear() === now.getFullYear();
+    state.selected = isoDay(thisMonth ? now : state.month);
   }
-  state.jellies = [];
-  watchMonth();
-  renderMain();
+  render();
+}
+
+function goToday() {
+  state.month = firstOfMonth(new Date());
+  state.selected = todayIso();
+  render();
+}
+
+function setView(view) {
+  if (state.view === view) return;
+  state.view = view;
+  saved.set('view', view);
+  render();
 }
 
 function jelliesOn(iso) {
@@ -430,30 +524,80 @@ function jelliesOn(iso) {
 
 // ---------------------------------------------------------------- main view
 
-function renderMain() {
-  if (!state.spaceId) return;
-  const month = state.month;
-  const title = `${month.getFullYear()}년 ${month.getMonth() + 1}월`;
+/** Draws whatever the page should show now. Safe to call often: box views are updated in place. */
+function render() {
+  if (!ready) return;
+  if (isAll()) {
+    ensureMonth(firstOfMonth(parseDay(state.host.date)));
+    renderAll();
+    return;
+  }
+  if (!state.spaceId) {
+    if (screen !== 'welcome') renderWelcome(pendingCode);
+    return;
+  }
+  ensureMonth(state.month);
+  if (state.view === 'box') renderSharedBox();
+  else renderMonth();
+}
 
-  const header = h('div', { class: 'header' },
-    h('button', { class: 'icon-btn', 'aria-label': '이전 달', onClick: () => shiftMonth(-1) }, '‹'),
-    h('div', null,
-      h('div', { class: 'month-title', 'data-testid': 'month' }, title),
-      h('div', { class: 'space-name' }, state.space?.name || '공유 젤리 달력')),
-    h('button', { class: 'icon-btn', 'aria-label': '다음 달', onClick: () => shiftMonth(1) }, '›'),
-    h('button', {
-      class: 'chip',
-      onClick: () => {
-        state.month = firstOfMonth(new Date());
-        state.selected = today;
-        watchMonth();
-        renderMain();
-      },
-    }, '오늘'),
-    h('button', { class: 'members', 'aria-label': '함께 쓰는 사람과 메뉴', onClick: () => openSheet({ kind: 'menu' }), 'data-testid': 'menu' },
-      state.members.map((m) => avatar(m.uid, m.name)),
-      h('span', { class: 'icon-btn', style: { width: '32px', fontSize: '20px' } }, '⋯')),
-  );
+function membersButton() {
+  return h('button', { class: 'members', 'aria-label': '함께 쓰는 사람과 메뉴', onClick: () => openSheet({ kind: 'menu' }), 'data-testid': 'menu' },
+    state.members.map((m) => avatar(m.uid, m.name)),
+    h('span', { class: 'icon-btn', style: { width: '32px', fontSize: '20px' } }, '⋯'));
+}
+
+function header({ title, sub, testid, prev, next, prevLabel, nextLabel }) {
+  return h('div', { class: 'header' },
+    h('button', { class: 'icon-btn', 'aria-label': prevLabel, onClick: prev }, '‹'),
+    h('div', { class: 'head-text' },
+      h('div', { class: 'month-title', 'data-testid': testid }, title),
+      h('div', { class: 'space-name' }, sub)),
+    h('button', { class: 'icon-btn', 'aria-label': nextLabel, onClick: next }, '›'),
+    membersButton());
+}
+
+/** "달력 | 상자" and the way back to today. */
+function viewBar() {
+  const tab = (view, label) => h('button', {
+    class: `seg-btn${state.view === view ? ' on' : ''}`,
+    role: 'tab',
+    'aria-selected': state.view === view ? 'true' : 'false',
+    onClick: () => setView(view),
+    'data-testid': `view-${view}`,
+  }, label);
+  return h('div', { class: 'view-bar' },
+    h('div', { class: 'seg', role: 'tablist' }, tab('month', '달력'), tab('box', '상자')),
+    h('button', { class: 'chip', onClick: goToday }, '오늘'));
+}
+
+function offlineBanner() {
+  return state.online ? null : h('div', { class: 'banner offline' }, '오프라인이에요. 고친 내용은 연결되면 자동으로 올라가요.');
+}
+
+function leaveBox() {
+  if (!boxView) return;
+  boxView.box.destroy();
+  boxView = null;
+  if (testMode) window.__jellyBox = null;
+}
+
+function renderMonth() {
+  leaveBox();
+  screen = 'month';
+  document.body.classList.remove('fill');
+  const month = state.month;
+  const today = todayIso();
+
+  const top = header({
+    title: `${month.getFullYear()}년 ${month.getMonth() + 1}월`,
+    sub: state.space?.name || '공유 젤리 달력',
+    testid: 'month',
+    prev: () => shiftMonth(-1),
+    next: () => shiftMonth(1),
+    prevLabel: '이전 달',
+    nextLabel: '다음 달',
+  });
 
   const weekdays = h('div', { class: 'weekdays' },
     DAY_NAMES.map((n, i) => h('div', { class: i === 5 ? 'sat' : i === 6 ? 'sun' : '' }, n)));
@@ -471,7 +615,7 @@ function renderMain() {
         onClick: () => {
           state.selected = iso;
           if (d.getMonth() !== month.getMonth()) shiftMonth(d < month ? -1 : 1);
-          else renderMain();
+          else render();
         },
       },
         h('span', { class: `num${weekday === 5 ? ' sat' : weekday === 6 ? ' sun' : ''}` }, d.getDate()),
@@ -493,7 +637,7 @@ function renderMain() {
       h('button', {
         class: 'jelly add-btn squish',
         vars: flavorVars(0),
-        onClick: () => openSheet({ kind: 'new' }),
+        onClick: () => openSheet({ kind: 'new', date: state.selected }),
         'data-testid': 'add',
       }, '+ 올리기')),
     list.length
@@ -502,10 +646,11 @@ function renderMain() {
   );
 
   appEl().replaceChildren(...[
-    header,
+    top,
+    viewBar(),
     weekdays,
     grid,
-    state.online ? null : h('div', { class: 'banner offline' }, '오프라인이에요. 고친 내용은 연결되면 자동으로 올라가요.'),
+    offlineBanner(),
     panel,
     installHint(),
   ].filter(Boolean));
@@ -562,6 +707,143 @@ function installHint() {
   return el;
 }
 
+// ---------------------------------------------------------------- boxes
+
+// The box screens fill the window and keep their box (and its falling jellies) between updates;
+// only the text around it is drawn again.
+let boxView = null;
+
+function useBoxView(kind, onAdd, onSwipe) {
+  if (boxView?.kind === kind && screen === kind && boxView.frame.isConnected) return boxView;
+  leaveBox();
+  const inner = h('div', { class: 'box-inner', 'data-testid': 'box' });
+  const frame = h('div', { class: 'box-frame' },
+    inner,
+    h('button', { class: 'jelly box-add squish', vars: flavorVars(0), 'aria-label': '젤리 올리기', onClick: onAdd, 'data-testid': 'box-add' }, '+'));
+  const top = h('div', { class: 'box-top' });
+  const note = h('div', { class: 'box-note' });
+  appEl().replaceChildren(top, note, frame);
+  document.body.classList.add('fill');
+  screen = kind;
+  const box = new JellyBox(inner, { onOpen: openItem, onToggle: toggleItem, onSwipe });
+  boxView = { kind, top, note, frame, box };
+  if (testMode) window.__jellyBox = box;
+  return boxView;
+}
+
+function initial(name) {
+  return Array.from(name || '?')[0];
+}
+
+function sharedItem(j) {
+  return {
+    key: `s:${j.id}`,
+    title: j.title,
+    start: j.start,
+    duration: j.duration,
+    flavor: j.flavor,
+    done: !!j.done,
+    badge: { text: initial(realName(j.by, j.byName)), color: memberColor(j.by) },
+    ref: { kind: 'shared', id: j.id },
+  };
+}
+
+function personalItem(p) {
+  return {
+    key: `p:${p.id}`,
+    title: p.title,
+    start: p.start ?? null,
+    duration: p.duration || 30,
+    flavor: p.flavor ?? 0,
+    done: !!p.done,
+    badge: null,
+    ref: { kind: 'personal', id: p.id },
+  };
+}
+
+function openItem(item) {
+  if (item.ref.kind === 'personal') bridge?.openPersonal?.(item.ref.id);
+  else openSheet({ kind: 'jelly', id: item.ref.id });
+}
+
+function toggleItem(item) {
+  if (item.ref.kind === 'personal') {
+    bridge?.togglePersonal?.(item.ref.id);
+    return;
+  }
+  const j = state.jellies.find((x) => x.id === item.ref.id);
+  if (!j) return;
+  store.updateJelly(state.spaceId, j.id, { done: !j.done }, state.myName).catch((e) => {
+    console.error(e);
+    toast('저장하지 못했어요');
+  });
+}
+
+function renderSharedBox() {
+  const v = useBoxView(
+    'shared-box',
+    () => openSheet({ kind: 'new', date: state.selected }),
+    (dir) => showDay(isoDay(addDays(parseDay(state.selected), dir))),
+  );
+  const list = jelliesOn(state.selected);
+  const isToday = state.selected === todayIso();
+  v.top.replaceChildren(
+    header({
+      title: dayTitle(state.selected),
+      sub: `${isToday ? '오늘 · ' : ''}${list.length ? `공유 젤리 ${list.length}개` : '아직 비어 있어요'}`,
+      testid: 'day-head',
+      prev: () => showDay(isoDay(addDays(parseDay(state.selected), -1))),
+      next: () => showDay(isoDay(addDays(parseDay(state.selected), 1))),
+      prevLabel: '전날',
+      nextLabel: '다음 날',
+    }),
+    viewBar(),
+  );
+  v.note.replaceChildren(...[offlineBanner()].filter(Boolean));
+  v.box.setOptions(gestures());
+  v.box.setEmpty('이 날은 비어 있어요', '오른쪽 위 + 버튼으로 같이 할 일을 올려 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
+  v.box.set(list.map(sharedItem));
+}
+
+/** The app's "모두" tab: the phone's own jellies of the day and the shared ones, in one box. */
+function renderAll() {
+  const host = state.host;
+  const v = useBoxView(
+    'all',
+    () => {
+      // The box outlives day changes, so the day is read when the button is pressed.
+      const date = state.host?.date;
+      if (!date) return;
+      if (state.spaceId) openSheet({ kind: 'add', date });
+      else bridge?.createPersonal?.(date);
+    },
+    (dir) => bridge?.shiftDay?.(dir),
+  );
+  const personal = (Array.isArray(host.personal) ? host.personal : []).filter((p) => p && p.id && p.title != null);
+  const shared = state.spaceId ? jelliesOn(host.date) : [];
+  v.top.replaceChildren(
+    h('div', { class: 'legend', 'data-testid': 'legend' },
+      h('span', { class: 'legend-item' }, h('span', { class: 'legend-mine' }), `내 젤리 ${personal.length}`),
+      h('span', { class: 'legend-item' },
+        state.members.length
+          ? state.members.map((m) => avatar(m.uid, m.name, true))
+          : h('span', { class: 'avatar small', style: { background: MEMBER_COLORS[1] } }, '공'),
+        `공유 젤리 ${shared.length}`),
+      h('span', { class: 'legend-note' }, '동그라미 글자: 공유 젤리를 올린 사람')),
+  );
+  v.note.replaceChildren(...[
+    state.spaceId
+      ? null
+      : h('div', { class: 'banner', 'data-testid': 'no-space' },
+          h('div', null, '아직 공유 달력에 들어가지 않았어요. ‘공유 젤리’ 탭에서 달력을 만들거나 초대 코드로 들어가면, 공유 젤리도 이 상자에 함께 떨어져요.'),
+          bridge?.showShared ? h('button', { class: 'chip on', onClick: () => bridge.showShared() }, '열기') : null),
+    offlineBanner(),
+  ].filter(Boolean));
+  v.box.setOptions(gestures());
+  v.box.setEmpty('이 날은 비어 있어요', '오른쪽 위 + 버튼으로 내 젤리나 공유 젤리를 넣어 보세요. 빈 곳을 옆으로 밀면 다른 날로 가요.');
+  v.box.set([...personal.map(personalItem), ...shared.map(sharedItem)]);
+}
+
 // ---------------------------------------------------------------- sheets
 
 function openSheet(sheet) {
@@ -599,6 +881,7 @@ function buildSheet() {
   const s = state.sheet;
   if (!s) return;
   if (s.kind === 'jelly' || s.kind === 'new') buildJellySheet();
+  else if (s.kind === 'add') buildAddSheet();
   else if (s.kind === 'invite') buildInviteSheet();
   else if (s.kind === 'menu') buildMenuSheet();
   else if (s.kind === 'name') buildNameSheet();
@@ -612,7 +895,7 @@ function buildJellySheet() {
   // The draft that is shown and edited; for an existing jelly, changes are saved as they happen.
   const draft = existing
     ? { ...existing }
-    : { title: '', date: state.selected, start: null, duration: 60, flavor: state.jellies.length % FLAVORS.length, done: false, note: '' };
+    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.jellies.length % FLAVORS.length, done: false, note: '' };
 
   const preview = h('div', { class: 'jelly card', style: { animation: 'none', marginBottom: '6px' } });
   const title = h('input', {
@@ -946,9 +1229,7 @@ function buildMenuSheet() {
             console.error(e);
           }
           closeSheet();
-          saved.set('space', null);
-          state.spaceId = null;
-          renderWelcome();
+          forgetSpace();
         },
       }, '이 달력에서 나가기')),
   );
@@ -957,6 +1238,29 @@ function buildMenuSheet() {
 function openReplace(sheet) {
   state.sheet = sheet;
   buildSheet();
+}
+
+/** "+" in the app's "모두" tab: one of my own jellies, or a shared one. */
+function buildAddSheet() {
+  const date = state.sheet.date;
+  sheetFrame(
+    h('div', { class: 'day-title', style: { marginBottom: '6px' } }, dayTitle(date)),
+    h('p', { style: { color: 'var(--text-sub)', fontSize: '14px', margin: '0 0 14px' } }, '어떤 젤리를 넣을까요?'),
+    h('div', { class: 'menu-list' },
+      h('button', {
+        class: 'btn block',
+        'data-testid': 'add-personal',
+        onClick: () => {
+          closeSheet();
+          bridge?.createPersonal?.(date);
+        },
+      }, '내 젤리 만들기 (나만 봐요)'),
+      h('button', {
+        class: 'btn ghost block',
+        'data-testid': 'add-shared',
+        onClick: () => openReplace({ kind: 'new', date }),
+      }, '공유 젤리 올리기 (상대도 봐요)')),
+  );
 }
 
 function buildNameSheet() {

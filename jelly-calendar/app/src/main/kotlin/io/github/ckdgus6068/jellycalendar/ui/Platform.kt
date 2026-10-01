@@ -7,8 +7,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.LocalJellyColors
+import java.time.LocalDate
 
 /** Things only the phone can do. The Android implementation lives next to MainActivity. */
 interface JellyPlatform {
@@ -38,9 +40,12 @@ interface JellyPlatform {
     /** The installed version, e.g. "0.2.12", shown in settings. */
     val appVersion: String get() = ""
 
-    /** The shared calendar ("공유 젤리"), a web page that the other person can open on any phone. */
+    /**
+     * The shared calendar ("공유 젤리"), a web page that the other person can open on any phone.
+     * [host] says what it shows here: the calendar itself, or one day with the phone's own jellies.
+     */
     @Composable
-    fun SharedSpace(modifier: Modifier) {
+    fun SharedSpace(modifier: Modifier, host: SharedHost) {
         Box(modifier, contentAlignment = Alignment.Center) {
             Text(
                 "이 기기에서는 공유 젤리를 열 수 없어요.",
@@ -52,4 +57,25 @@ interface JellyPlatform {
 
     /** Lets the shared page take the back button first, e.g. to close an open sheet. */
     fun sharedBack(): Boolean = false
+}
+
+/** What the shared page shows inside the app, and what it may ask the app to do. */
+class SharedHost(
+    /** False: the shared calendar. True: everything on [date] in one box ("모두"). */
+    val all: Boolean,
+    val date: LocalDate,
+    /** The phone's own jellies on [date]; only handed to the page when [all]. */
+    val personal: List<Jelly>,
+    val doneByDoubleTap: Boolean,
+    val doneByLongPress: Boolean,
+    val actions: SharedHostActions,
+)
+
+/** Requests from the shared page about the phone's own jellies. */
+interface SharedHostActions {
+    fun openPersonal(id: String)
+    fun togglePersonal(id: String)
+    fun createPersonal(date: LocalDate)
+    fun shiftDay(direction: Int)
+    fun showShared()
 }

@@ -47,8 +47,19 @@ shot 2-box
 tap_text "주" && sleep 4 && shot 3-week
 tap_text "일" && sleep 4 && shot 4-day
 tap_text "상자" && sleep 6 && shot 5-box-again
-tap_text "공유" && sleep 12 && shot 5b-shared
-tap_text "상자" && sleep 3
+tap_text "공유 젤리" && sleep 12 && shot 5b-shared
+tap_text "모두" && sleep 8 && shot 5c-all
+tap_text "내 젤리" && sleep 3
+
+# The shared page reports the size it sees. A web view laid out without a height (CSS vh of 0)
+# squashes the page's bottom sheets into a sliver.
+viewport=$(adb logcat -d | grep -o 'jelly-share viewport [^"]*' | tail -n 1)
+echo "shared page: ${viewport:-did not report its viewport}"
+flat_page=0
+if echo "$viewport" | grep -Eq 'vh100=0$'; then
+    echo "::error::the shared page sees a zero viewport height"
+    flat_page=1
+fi
 
 # Cold start again, now with saved data and the guide already seen.
 adb shell am force-stop "$pkg"
@@ -59,7 +70,8 @@ shot 6-second-launch
 adb logcat -d > "$out/logcat.txt"
 adb logcat -d -b crash > "$out/crash.txt" 2>/dev/null || true
 
-status=0
+status=$flat_page
+grep -E 'CONSOLE.*(Uncaught|TypeError|ReferenceError)' "$out/logcat.txt" | head -n 20
 if grep -q "FATAL EXCEPTION" "$out/logcat.txt" || [ -s "$out/crash.txt" ]; then
     echo "::error::the app crashed"
     grep -n -A 40 "FATAL EXCEPTION" "$out/logcat.txt" | head -n 160

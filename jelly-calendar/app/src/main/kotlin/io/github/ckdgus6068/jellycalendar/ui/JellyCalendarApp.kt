@@ -34,12 +34,14 @@ import io.github.ckdgus6068.jellycalendar.core.ALL_DAYS
 import io.github.ckdgus6068.jellycalendar.core.AppData
 import io.github.ckdgus6068.jellycalendar.core.Jelly
 import io.github.ckdgus6068.jellycalendar.core.JellyCodec
+import io.github.ckdgus6068.jellycalendar.core.JellyStatus
 import io.github.ckdgus6068.jellycalendar.core.JellyStore
 import io.github.ckdgus6068.jellycalendar.core.Planner
 import io.github.ckdgus6068.jellycalendar.core.Routine
 import io.github.ckdgus6068.jellycalendar.core.WakeLogic
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarActions
 import io.github.ckdgus6068.jellycalendar.ui.calendar.CalendarScreen
+import io.github.ckdgus6068.jellycalendar.ui.calendar.Space
 import io.github.ckdgus6068.jellycalendar.ui.calendar.ViewMode
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragController
 import io.github.ckdgus6068.jellycalendar.ui.drag.DragOverlay
@@ -82,6 +84,7 @@ fun JellyCalendarApp(
     store: JellyStore,
     platform: JellyPlatform,
     modifier: Modifier = Modifier,
+    initialSpace: Space = Space.MINE,
     initialMode: ViewMode = ViewMode.BOX,
     initialScreen: Screen = Screen.CALENDAR,
 ) {
@@ -98,6 +101,7 @@ fun JellyCalendarApp(
     val nowMinute = now.hour * 60 + now.minute
 
     var screen by rememberSaveable { mutableStateOf(initialScreen) }
+    var space by rememberSaveable { mutableStateOf(initialSpace) }
     var mode by rememberSaveable { mutableStateOf(initialMode) }
     var selectedDay by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     val selected = LocalDate.ofEpochDay(selectedDay)
@@ -270,12 +274,17 @@ fun JellyCalendarApp(
             selectedDay = date.toEpochDay()
         }
 
+        override fun changeSpace(newSpace: Space) {
+            space = newSpace
+        }
+
         override fun changeMode(newMode: ViewMode) {
             mode = newMode
         }
 
         override fun shift(direction: Int) {
-            selectedDay += if (mode == ViewMode.WEEK) 7L * direction else direction.toLong()
+            val week = space == Space.MINE && mode == ViewMode.WEEK
+            selectedDay += if (week) 7L * direction else direction.toLong()
         }
 
         override fun goToday() {
@@ -335,10 +344,46 @@ fun JellyCalendarApp(
         }
     }
 
-    platform.BackHandler(enabled = editor == null && (screen != Screen.CALENDAR || mode != ViewMode.BOX)) {
+    // The shared page hears about the phone's own jellies only in "모두", and only those of the day.
+    val hostActions = object : SharedHostActions {
+        override fun openPersonal(id: String) {
+            store.current.jelly(id)?.let { actions.open(it) }
+        }
+
+        override fun togglePersonal(id: String) {
+            if (store.current.jelly(id) != null) store.toggleDone(id)
+        }
+
+        override fun createPersonal(date: LocalDate) = actions.create(date, null)
+
+        override fun shiftDay(direction: Int) {
+            selectedDay += direction.coerceIn(-1, 1).toLong()
+        }
+
+        override fun showShared() {
+            space = Space.SHARED
+        }
+    }
+    val host = SharedHost(
+        all = space == Space.ALL,
+        date = selected,
+        personal = if (space == Space.ALL) {
+            Planner.scheduledOn(data, selected).filter { it.status != JellyStatus.MISSED }
+        } else {
+            emptyList()
+        },
+        doneByDoubleTap = data.settings.doneByDoubleTap,
+        doneByLongPress = data.settings.doneByLongPress,
+        actions = hostActions,
+    )
+
+    platform.BackHandler(
+        enabled = editor == null && (screen != Screen.CALENDAR || space != Space.MINE || mode != ViewMode.BOX),
+    ) {
         when {
             screen != Screen.CALENDAR -> screen = Screen.CALENDAR
-            mode == ViewMode.SHARED && platform.sharedBack() -> Unit
+            space != Space.MINE && platform.sharedBack() -> Unit
+            space != Space.MINE -> space = Space.MINE
             else -> mode = ViewMode.BOX
         }
     }
@@ -356,6 +401,7 @@ fun JellyCalendarApp(
                     Screen.CALENDAR -> CalendarScreen(
                         data = data,
                         now = now,
+                        space = space,
                         mode = mode,
                         selected = selected,
                         weekStart = weekStart,
@@ -363,7 +409,7 @@ fun JellyCalendarApp(
                         weekScroll = weekScroll,
                         dayScroll = dayScroll,
                         actions = actions,
-                        sharedSpace = { platform.SharedSpace(it) },
+                        sharedSpace = { platform.SharedSpace(it, host) },
                     )
                     Screen.ROUTINES -> RoutinesScreen(
                         routines = data.routines,
@@ -405,7 +451,7 @@ fun JellyCalendarApp(
                 }
                 DragOverlay(
                     drag = drag,
-                    compact = mode == ViewMode.WEEK,
+                    compact = space == Space.MINE && mode == ViewMode.WEEK,
                     caption = { jelly, target ->
                         when (target) {
                             is DropTarget.Slot -> if (target.allowed) range(target.startMin, jelly.durationMin) else "지난 날"

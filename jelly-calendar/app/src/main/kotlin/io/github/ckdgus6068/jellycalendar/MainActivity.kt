@@ -31,9 +31,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.viewinterop.AndroidView
 import io.github.ckdgus6068.jellycalendar.ui.JellyCalendarApp
 import io.github.ckdgus6068.jellycalendar.ui.JellyPlatform
+import io.github.ckdgus6068.jellycalendar.ui.SharedHost
+import io.github.ckdgus6068.jellycalendar.ui.SharedHostActions
 import io.github.ckdgus6068.jellycalendar.ui.theme.BundledFonts
 import io.github.ckdgus6068.jellycalendar.ui.theme.DarkJellyColors
 import io.github.ckdgus6068.jellycalendar.ui.theme.LightJellyColors
+import java.time.LocalDate
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** The shared calendar, published from the repository's docs/share folder by GitHub Pages. */
 private const val SHARE_URL = "https://ckdgus6068-sudo.github.io/ckdgus6068-sudo/share/"
@@ -45,6 +50,11 @@ class MainActivity : ComponentActivity() {
 
     /** Kept for the life of the screen, so switching tabs does not reload the shared calendar. */
     private var sharedWeb: WebView? = null
+
+    /** What the shared page should show, as the JSON it reads through [ShareBridge.hostState]. */
+    @Volatile
+    private var hostJson: String = "{\"mode\":\"shared\"}"
+    private var hostActions: SharedHostActions? = null
 
     private var pendingExport: String? = null
     private var pendingImport: ((String) -> Unit)? = null
@@ -104,9 +114,10 @@ class MainActivity : ComponentActivity() {
         }
 
         @Composable
-        override fun SharedSpace(modifier: Modifier) {
+        override fun SharedSpace(modifier: Modifier, host: SharedHost) {
             AndroidView(
                 factory = { sharedWebView().also { (it.parent as? ViewGroup)?.removeView(it) } },
+                update = { showHost(it, host) },
                 modifier = modifier,
             )
         }
@@ -189,7 +200,11 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** Hands invite texts from the shared page to Android's share sheet (KakaoTalk, messages...). */
+    /**
+     * The app's side of the shared page: invite texts go to Android's share sheet (KakaoTalk,
+     * messages...), and in "모두" the page reads the day's own jellies and asks the app to open,
+     * finish or add them. Called on a background thread, so everything is handed to the UI thread.
+     */
     inner class ShareBridge {
         @JavascriptInterface
         fun share(text: String) {
@@ -198,10 +213,71 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent.createChooser(send, "공유 젤리 초대 보내기"))
             }
         }
+
+        @JavascriptInterface
+        fun hostState(): String = hostJson
+
+        @JavascriptInterface
+        fun openPersonal(id: String) = onHost { it.openPersonal(id) }
+
+        @JavascriptInterface
+        fun togglePersonal(id: String) = onHost { it.togglePersonal(id) }
+
+        @JavascriptInterface
+        fun createPersonal(date: String) {
+            val day = runCatching { LocalDate.parse(date) }.getOrNull() ?: return
+            onHost { it.createPersonal(day) }
+        }
+
+        @JavascriptInterface
+        fun shiftDay(direction: Int) = onHost { it.shiftDay(direction) }
+
+        @JavascriptInterface
+        fun showShared() = onHost { it.showShared() }
+    }
+
+    private fun onHost(request: (SharedHostActions) -> Unit) {
+        runOnUiThread { hostActions?.let(request) }
+    }
+
+    /** Hands the page what to show, and pokes it when that changed (it then reads [hostJson]). */
+    private fun showHost(web: WebView, host: SharedHost) {
+        hostActions = host.actions
+        val json = hostJsonOf(host)
+        if (json == hostJson) return
+        hostJson = json
+        web.evaluateJavascript("window.jellyHost && window.jellyHost.poke()", null)
+    }
+
+    private fun hostJsonOf(host: SharedHost): String {
+        val personal = JSONArray()
+        if (host.all) {
+            for (jelly in host.personal) {
+                personal.put(
+                    JSONObject()
+                        .put("id", jelly.id)
+                        .put("title", jelly.title)
+                        .put("start", jelly.startMin ?: JSONObject.NULL)
+                        .put("duration", jelly.durationMin)
+                        .put("flavor", jelly.flavor)
+                        .put("done", jelly.isDone),
+                )
+            }
+        }
+        return JSONObject()
+            .put("mode", if (host.all) "all" else "shared")
+            .put("date", host.date.toString())
+            .put("doubleTap", host.doneByDoubleTap)
+            .put("longPress", host.doneByLongPress)
+            .put("personal", personal)
+            .toString()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun sharedWebView(): WebView = sharedWeb ?: WebView(this).also { web ->
+        // Without this, Compose adds the view as WRAP_CONTENT, and the web view then lays the page out
+        // as if it had no height: CSS vh becomes 0 and the page's bottom sheets collapse to a sliver.
+        web.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         // Lets the page know it runs inside the app (no "add to home screen" hint, app share sheet).
