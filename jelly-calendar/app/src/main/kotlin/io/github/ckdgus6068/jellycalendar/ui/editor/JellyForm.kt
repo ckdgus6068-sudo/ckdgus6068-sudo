@@ -72,7 +72,8 @@ import io.github.ckdgus6068.jellycalendar.ui.common.clickableNoRipple
 import io.github.ckdgus6068.jellycalendar.ui.common.squishyClick
 import io.github.ckdgus6068.jellycalendar.ui.dateTitle
 import io.github.ckdgus6068.jellycalendar.ui.dayName
-import io.github.ckdgus6068.jellycalendar.ui.daysText
+import io.github.ckdgus6068.jellycalendar.ui.repeatText
+import io.github.ckdgus6068.jellycalendar.ui.shortDate
 import io.github.ckdgus6068.jellycalendar.ui.durationText
 import io.github.ckdgus6068.jellycalendar.ui.endText
 import io.github.ckdgus6068.jellycalendar.ui.hm
@@ -111,6 +112,8 @@ class EditorState(
     note: String,
     active: Boolean,
     pinned: Boolean = false,
+    everyDays: Int = 0,
+    cycleStart: LocalDate? = null,
 ) {
     var title by mutableStateOf(title)
     var flavor by mutableStateOf(flavor)
@@ -123,6 +126,12 @@ class EditorState(
     var note by mutableStateOf(note)
     var active by mutableStateOf(active)
     var pinned by mutableStateOf(pinned)
+
+    /** Every this many days instead of on [days] (0 = on [days]); see [Routine.everyDays]. */
+    var everyDays by mutableStateOf(everyDays)
+
+    /** A day of the cycle; a jelly's own date is used for a jelly that becomes repeating. */
+    var cycleStart by mutableStateOf(cycleStart)
 
     /** Minutes before the start that a clock alarm is set for. */
     var alarmBefore by mutableStateOf(10)
@@ -156,10 +165,13 @@ class EditorState(
     }
 
     val isNew: Boolean get() = if (kind == EditorKind.JELLY) jellyId == null else routineId == null
-    val repeats: Boolean get() = kind == EditorKind.ROUTINE || days.isNotEmpty()
+    val repeats: Boolean get() = kind == EditorKind.ROUTINE || willRepeat
+
+    /** A jelly that turns into a repeating one on saving: on days of the week, or every few days. */
+    val willRepeat: Boolean get() = days.isNotEmpty() || everyDays >= 2
 
     /** Something beyond name, colour, length and time is set, so the extras start open. */
-    val hasExtras: Boolean get() = pinned || days.isNotEmpty() || note.isNotBlank() || !carryOver || wakeAnchored
+    val hasExtras: Boolean get() = pinned || willRepeat || note.isNotBlank() || !carryOver || wakeAnchored
 
     companion object {
         fun newJelly(date: LocalDate?, start: Int?, flavor: Int) = EditorState(
@@ -182,6 +194,8 @@ class EditorState(
             EditorKind.ROUTINE, null, routine.id, null, null,
             routine.title, routine.flavor, routine.durationMin, null, routine.startMin,
             routine.days, routine.wakeAnchored, routine.carryOver, routine.note, routine.active,
+            everyDays = if (routine.inCycle) routine.everyDays else 0,
+            cycleStart = routine.cycleStart,
         )
     }
 }
@@ -285,8 +299,8 @@ fun JellyForm(
 
         val linked = state.linkedRoutine
         if (!isJelly) {
-            Label("반복 · ${daysText(state.days)}")
-            DaysPicker(state.days, allowNone = false) { state.days = it }
+            Label("반복 · ${repeatText(state.days, state.everyDays)}")
+            RepeatPicker(state, allowNone = false, today = now.toLocalDate())
         } else if (linked != null) {
             Spacer(Modifier.height(14.dp))
             Column(
@@ -297,7 +311,7 @@ fun JellyForm(
                     .padding(14.dp),
             ) {
                 Text(
-                    keepWords("‘${daysText(linked.days)} ${hm(linked.startMin)} · ${durationText(linked.durationMin)}’ 반복 젤리의 하루치예요."),
+                    keepWords("‘${repeatText(linked)} ${hm(linked.startMin)} · ${durationText(linked.durationMin)}’ 반복 젤리의 하루치예요."),
                     color = colors.text,
                     fontSize = 13.sp,
                 )
@@ -331,12 +345,12 @@ fun JellyForm(
             Column {
                 if (isJelly) {
                     val dayFull = state.date != null && !state.pinned && !canPin(state.date)
-                    val pinnable = state.date != null && state.start != null && state.days.isEmpty() && !dayFull
+                    val pinnable = state.date != null && state.start != null && !state.willRepeat && !dayFull
                     SwitchRow(
                         title = "📌 젤위로 고정",
                         description = when {
                             state.date == null -> "날짜가 정해진 젤리만 고정할 수 있어요."
-                            state.days.isNotEmpty() -> "반복 젤리는 만든 뒤에 그날 것을 열어서 고정해 주세요."
+                            state.willRepeat -> "반복 젤리는 만든 뒤에 그날 것을 열어서 고정해 주세요."
                             dayFull -> "이 날은 벌써 3개가 고정돼 있어요. 하나를 풀면 고정할 수 있어요."
                             else -> "젤 중요한 젤리를 상자 맨 위에 꼭 붙여 둬요. 하루 3개까지예요."
                         },
@@ -346,10 +360,7 @@ fun JellyForm(
                     AlarmRow(state, now, onSetAlarm, onPickAlarmDate)
                     if (linked == null) {
                         Label("반복")
-                        DaysPicker(state.days, allowNone = true) {
-                            state.days = it
-                            if (it.isNotEmpty()) state.pinned = false
-                        }
+                        RepeatPicker(state, allowNone = true, today = now.toLocalDate())
                     }
                 }
                 SwitchRow(
@@ -932,18 +943,74 @@ private fun AlarmRow(
     }
 }
 
+/**
+ * "반복": on days of the week, or every few days ("6일마다", a duty every six days). A jelly that
+ * becomes repeating counts its days from its own date; a repeating jelly picks the day here.
+ */
 @Composable
-private fun DaysPicker(days: Set<Int>, allowNone: Boolean, onChange: (Set<Int>) -> Unit) {
+private fun RepeatPicker(state: EditorState, allowNone: Boolean, today: LocalDate) {
     val colors = LocalJellyColors.current
+    val cycle = state.everyDays >= 2
+    fun onDays(days: Set<Int>) {
+        state.days = days
+        state.everyDays = 0
+        if (days.isNotEmpty()) state.pinned = false
+    }
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (allowNone) JellyChip("안 함", selected = days.isEmpty(), onClick = { onChange(emptySet()) })
-        JellyChip("매일", selected = days == ALL_DAYS, onClick = { onChange(ALL_DAYS) })
-        JellyChip("평일", selected = days == WEEKDAYS, onClick = { onChange(WEEKDAYS) })
-        JellyChip("주말", selected = days == WEEKEND, onClick = { onChange(WEEKEND) })
+        if (allowNone) JellyChip("안 함", selected = !cycle && state.days.isEmpty(), onClick = { onDays(emptySet()) })
+        JellyChip("매일", selected = !cycle && state.days == ALL_DAYS, onClick = { onDays(ALL_DAYS) })
+        JellyChip("평일", selected = !cycle && state.days == WEEKDAYS, onClick = { onDays(WEEKDAYS) })
+        JellyChip("주말", selected = !cycle && state.days == WEEKEND, onClick = { onDays(WEEKEND) })
+        JellyChip("며칠마다", selected = cycle, onClick = {
+            if (!cycle) {
+                state.everyDays = 2
+                if (state.cycleStart == null) state.cycleStart = state.date ?: today
+                if (state.days.isEmpty()) state.days = ALL_DAYS
+                state.pinned = false
+            }
+        })
     }
+    if (cycle) {
+        Spacer(Modifier.height(10.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            JellyChip("−", selected = false, onClick = { state.everyDays = (state.everyDays - 1).coerceAtLeast(2) })
+            Text("${state.everyDays}일마다", color = colors.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            JellyChip("+", selected = false, onClick = { state.everyDays = (state.everyDays + 1).coerceAtMost(30) })
+        }
+        Spacer(Modifier.height(8.dp))
+        val jellyDate = state.date
+        if (state.kind == EditorKind.JELLY && jellyDate != null) {
+            Text(
+                keepWords("이 젤리의 날(${shortDate(jellyDate)})부터 ${state.everyDays}일마다 깔려요."),
+                color = colors.textSub,
+                fontSize = 12.sp,
+            )
+        } else {
+            val start = state.cycleStart ?: today
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JellyChip("‹", selected = false, onClick = { state.cycleStart = start.minusDays(1) })
+                Text("${shortDate(start)}부터", color = colors.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                JellyChip("›", selected = false, onClick = { state.cycleStart = start.plusDays(1) })
+                if (start != today) JellyChip("오늘", selected = false, onClick = { state.cycleStart = today })
+            }
+            Text(
+                keepWords("이 날이 반복의 첫날이에요. 그 뒤로 ${state.everyDays}일마다 깔려요."),
+                color = colors.textSub,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        return
+    }
+    DayCircles(state.days, allowNone) { onDays(it) }
+}
+
+@Composable
+private fun DayCircles(days: Set<Int>, allowNone: Boolean, onChange: (Set<Int>) -> Unit) {
+    val colors = LocalJellyColors.current
     if (days.isNotEmpty() || !allowNone) {
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

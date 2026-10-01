@@ -200,6 +200,8 @@ fun JellyCalendarApp(
                     active = e.active,
                     since = existing?.since ?: today,
                     note = e.note,
+                    everyDays = e.everyDays,
+                    cycleStart = if (e.everyDays >= 2) e.cycleStart ?: today else null,
                 )
                 store.saveRoutine(routine, weekDays)
                 notify(if (existing == null) "반복 젤리를 만들었어요" else "반복 젤리를 고쳤어요")
@@ -207,7 +209,7 @@ fun JellyCalendarApp(
             EditorKind.JELLY -> {
                 val existing = e.jellyId?.let { data.jelly(it) }
                 if (existing == null) {
-                    if (e.days.isNotEmpty()) {
+                    if (e.willRepeat) {
                         val routine = Routine(
                             id = store.newId(),
                             title = title,
@@ -219,9 +221,11 @@ fun JellyCalendarApp(
                             carryOver = e.carryOver,
                             since = maxOf(today, e.date ?: today),
                             note = e.note,
+                            everyDays = e.everyDays,
+                            cycleStart = if (e.everyDays >= 2) e.date ?: today else null,
                         )
                         store.saveRoutine(routine, weekDays)
-                        notify("${daysText(e.days)} 반복 젤리를 만들었어요")
+                        notify("${repeatText(e.days, e.everyDays)} 반복 젤리를 만들었어요")
                     } else {
                         store.newJelly(title, e.flavor, e.duration, e.date, e.start, e.carryOver, e.note, pinned = e.pinned)
                         if (e.pinned && e.date != null) notify("📌 젤위로 고정했어요")
@@ -242,7 +246,7 @@ fun JellyCalendarApp(
                     // Pinning a day of a repeating jelly is not an edit that cuts it loose from the repeat.
                     val edited = updated.copy(pinned = existing.pinned) != existing
                     store.saveJelly(updated.copy(detached = existing.detached || (edited && existing.routineId != null)))
-                    if (e.days.isNotEmpty() && existing.routineId == null) {
+                    if (e.willRepeat && existing.routineId == null) {
                         val routine = Routine(
                             id = store.newId(),
                             title = title,
@@ -254,9 +258,11 @@ fun JellyCalendarApp(
                             carryOver = e.carryOver,
                             since = maxOf(today, e.date ?: today),
                             note = e.note,
+                            everyDays = e.everyDays,
+                            cycleStart = if (e.everyDays >= 2) e.date ?: today else null,
                         )
                         store.saveRoutine(routine, weekDays, linkJellyId = existing.id)
-                        notify("${daysText(e.days)} 반복 젤리로 만들었어요")
+                        notify("${repeatText(e.days, e.everyDays)} 반복 젤리로 만들었어요")
                     }
                 }
             }
@@ -459,6 +465,11 @@ fun JellyCalendarApp(
                         onEdit = { editor = EditorState.editRoutine(it) },
                         onNew = { editor = EditorState.newRoutine(nextFlavor()) },
                         onToggleActive = { routine, on -> store.saveRoutine(routine.copy(active = on), weekDays) },
+                        today = today,
+                        onAddPattern = { pattern, firstDay ->
+                            store.addShiftPattern(pattern, firstDay, weekDays)
+                            notify("‘${pattern.name}’ 근무를 반복 젤리로 넣었어요", undo = true)
+                        },
                     )
                     Screen.SETTINGS -> SettingsScreen(
                         settings = data.settings,

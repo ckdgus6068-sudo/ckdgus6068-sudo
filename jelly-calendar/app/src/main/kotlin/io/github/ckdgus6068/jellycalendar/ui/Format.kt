@@ -1,6 +1,7 @@
 package io.github.ckdgus6068.jellycalendar.ui
 
 import io.github.ckdgus6068.jellycalendar.core.ALL_DAYS
+import io.github.ckdgus6068.jellycalendar.core.Routine
 import io.github.ckdgus6068.jellycalendar.core.WEEKDAYS
 import io.github.ckdgus6068.jellycalendar.core.WEEKEND
 import java.time.LocalDate
@@ -66,6 +67,11 @@ fun weekTitle(start: LocalDate): String {
         "${start.monthValue}월 ${start.dayOfMonth}일 – ${end.monthValue}월 ${end.dayOfMonth}일"
     }
 }
+
+/** "매일", "평일", "월·수", or "6일마다" for a repeating jelly that comes back every few days. */
+fun repeatText(days: Set<Int>, everyDays: Int): String = if (everyDays >= 2) "${everyDays}일마다" else daysText(days)
+
+fun repeatText(routine: Routine): String = repeatText(routine.days, if (routine.inCycle) routine.everyDays else 0)
 
 fun daysText(days: Set<Int>): String = when (days) {
     ALL_DAYS -> "매일"

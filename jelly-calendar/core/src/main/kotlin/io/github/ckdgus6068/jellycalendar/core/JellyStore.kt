@@ -167,6 +167,19 @@ class JellyStore(
         }
     }
 
+    /** Lays down the shifts of [pattern] as repeating jellies, its first day being [firstDay]. Undoable. */
+    fun addShiftPattern(pattern: ShiftPatterns.Pattern, firstDay: LocalDate, visible: Collection<LocalDate>) {
+        val today = today()
+        val millis = nowMillis()
+        mutateWithUndo { data ->
+            var result = data
+            for (routine in ShiftPatterns.routines(pattern, firstDay, today, idFactory)) {
+                result = Planner.saveRoutine(result, routine, today)
+            }
+            Planner.refresh(result, visible, today, millis, idFactory)
+        }
+    }
+
     /** Deletes a routine and its untouched future days; [alsoJellyId] is removed in the same undoable step. */
     fun deleteRoutine(routineId: String, alsoJellyId: String? = null) {
         val today = today()

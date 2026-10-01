@@ -77,7 +77,10 @@ data class Jelly(
     val endDate: LocalDate? get() = date?.let { if (overnight) it.plusDays(1) else it }
 }
 
-/** A jelly that is laid down again and again on chosen days of the week. */
+/**
+ * A jelly that is laid down again and again: on chosen days of the week, or every few days in a
+ * cycle ([everyDays] from [cycleStart], e.g. a duty every six days or the shifts of 주야휴비).
+ */
 @Serializable
 data class Routine(
     val id: String,
@@ -92,9 +95,23 @@ data class Routine(
     val active: Boolean = true,
     val since: LocalDate,
     val note: String = "",
+    /** Every this many days (2 = every other day) counted from [cycleStart], instead of [days]; 0 = on [days]. */
+    val everyDays: Int = 0,
+    /** A day of the cycle when [everyDays] is set: the routine falls on it and every [everyDays] days around it. */
+    val cycleStart: LocalDate? = null,
 ) {
-    fun appliesTo(date: LocalDate): Boolean =
-        active && !date.isBefore(since) && date.dayOfWeek.value in days
+    /** Comes back every [everyDays] days rather than on days of the week. */
+    val inCycle: Boolean get() = everyDays >= 2 && cycleStart != null
+
+    fun appliesTo(date: LocalDate): Boolean {
+        if (!active || date.isBefore(since)) return false
+        val start = cycleStart
+        return if (everyDays >= 2 && start != null) {
+            Math.floorMod(java.time.temporal.ChronoUnit.DAYS.between(start, date), everyDays.toLong()) == 0L
+        } else {
+            date.dayOfWeek.value in days
+        }
+    }
 }
 
 @Serializable
