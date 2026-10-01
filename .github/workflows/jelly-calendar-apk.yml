@@ -213,11 +213,22 @@ jobs:
           - 설치: 휴대폰에서 아래 **JellyCalendar.apk**를 눌러 내려받은 뒤 실행합니다. “출처를 알 수 없는 앱 설치”를 허용해야 합니다.
           - 업데이트: 새 APK를 그대로 덮어 설치하면 데이터가 유지됩니다.
           EOF
-          gh release delete "$TAG" --yes --cleanup-tag || true
-          gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${TAG}" >/dev/null 2>&1 || true
-          sleep 3
-          gh release create "$TAG" dist/JellyCalendar.apk \
-            --target "$GITHUB_SHA" \
-            --title "젤리 캘린더 최신 버전 (${short})" \
-            --notes-file notes.md \
-            --latest
+          # Two pushes close together: an older run that finishes last must not put its APK back.
+          head="$(gh api "repos/${GH_REPO}/commits/${GITHUB_REF_NAME}" --jq .sha 2>/dev/null || echo "$GITHUB_SHA")"
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "${GITHUB_REF_NAME} has moved on to ${head::7}; its own run publishes the APK."
+            exit 0
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Keep the release and swap only the file, so the link is gone for seconds, not for
+            # the time it takes to delete and make a release.
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/${TAG}" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+            gh release upload "$TAG" dist/JellyCalendar.apk --clobber
+            gh release edit "$TAG" --title "젤리 캘린더 최신 버전 (${short})" --notes-file notes.md --latest
+          else
+            gh release create "$TAG" dist/JellyCalendar.apk \
+              --target "$GITHUB_SHA" \
+              --title "젤리 캘린더 최신 버전 (${short})" \
+              --notes-file notes.md \
+              --latest
+          fi
