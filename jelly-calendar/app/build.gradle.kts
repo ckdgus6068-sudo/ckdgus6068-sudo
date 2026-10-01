@@ -22,24 +22,27 @@ android {
         versionName = "0.2.$ciRun"
     }
 
+    // The release key is private: CI writes it from the JELLY_KEYSTORE_BASE64 secret to a file and
+    // passes the file and its password in JELLY_KEYSTORE_FILE and JELLY_KEYSTORE_PASSWORD. Every
+    // APK signed with it installs over the previous one and keeps its data.
+    val releaseKeystore = System.getenv("JELLY_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
     signingConfigs {
-        // A fixed key kept in the repository so that every new APK installs over the previous
-        // one (and keeps its data). Fine for a personal, side-loaded app; not for a store release.
-        create("sideload") {
-            storeFile = file("jelly-sideload.jks")
-            storePassword = "jellycalendar"
-            keyAlias = "jelly"
-            keyPassword = "jellycalendar"
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("JELLY_KEYSTORE_PASSWORD")
+                keyAlias = "jelly"
+                keyPassword = System.getenv("JELLY_KEYSTORE_PASSWORD")
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("sideload")
-        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("sideload")
+            // Without the key (a fork, or before it is set up) the APK gets the debug key; CI checks
+            // the certificate and never publishes such a build.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

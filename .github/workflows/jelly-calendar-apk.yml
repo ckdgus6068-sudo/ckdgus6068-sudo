@@ -18,6 +18,9 @@ jobs:
     defaults:
       run:
         working-directory: jelly-calendar
+    outputs:
+      # "true" only when the APK carries the private release key (checked below).
+      signed: ${{ steps.certificate.outputs.signed }}
     steps:
       - uses: actions/checkout@v5
 
@@ -31,8 +34,36 @@ jobs:
       - name: Unit tests (scheduling rules)
         run: ./gradlew --no-daemon :core:test
 
+      - name: Release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.JELLY_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/jelly-release.jks"
+            echo "JELLY_KEYSTORE_FILE=$RUNNER_TEMP/jelly-release.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::JELLY_KEYSTORE_BASE64 is not set: this APK gets a throwaway debug key and is not published."
+          fi
+
       - name: Build APK
         run: ./gradlew --no-daemon :app:assembleRelease
+        env:
+          JELLY_KEYSTORE_PASSWORD: ${{ secrets.JELLY_KEYSTORE_PASSWORD }}
+
+      # Only an APK signed with the release key (this certificate) may reach the phones.
+      - name: Check the signing certificate
+        id: certificate
+        run: |
+          set -euo pipefail
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          digest="$("$tools/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1)"
+          echo "certificate SHA-256: $digest"
+          if [ "$digest" = "08b15fad25691fef1f7c36f409d92e919813acf1b1417248f7880fcdee3539a2" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Not signed with the release key; the APK is built and tested but not published."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Name the APK
         run: |
@@ -149,7 +180,7 @@ jobs:
   # https://github.com/<owner>/<repo>/releases/download/jelly-calendar-latest/JellyCalendar.apk
   release:
     needs: build
-    if: github.event_name == 'workflow_dispatch' || github.ref_name == 'main' || startsWith(github.ref_name, 'claude/')
+    if: needs.build.outputs.signed == 'true' && (github.event_name == 'workflow_dispatch' || github.ref_name == 'main' || startsWith(github.ref_name, 'claude/'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
