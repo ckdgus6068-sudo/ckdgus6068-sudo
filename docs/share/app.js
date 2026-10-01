@@ -877,7 +877,7 @@ function signedInLine() {
     h('button', { class: 'link-btn', onClick: signOutHere }, '로그아웃'));
 }
 
-const PRIVACY_LINE = '이름, 색, 젤리, 메모는 달력에 들어온 사람의 기기에서만 열리도록 암호화되어 저장돼요. 서버를 운영하는 사람도 내용을 볼 수 없어요.';
+const PRIVACY_LINE = '이름, 색, 캐릭터, 젤리, 메모는 달력에 들어온 사람의 기기에서만 열리도록 암호화되어 저장돼요. 서버를 운영하는 사람도 내용을 볼 수 없어요.';
 
 /** The ten flavours to pick a colour from. */
 function colorSwatches(current, onPick) {
