@@ -12,6 +12,7 @@ const SHELL = [
   'holidays.js',
   'config.js',
   'style.css',
+  'privacy.html',
   'vendor/firebase.js',
   'manifest.webmanifest',
   'icons/icon-192.png',

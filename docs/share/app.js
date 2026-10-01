@@ -663,7 +663,7 @@ function renderWelcome(code = '') {
         h('h1', null, '공유 젤리'),
         h('p', null, code ? '초대받은 달력에 들어가기 전에 내 계정부터 만들어요.' : '함께 보고 고치는 젤리 달력이에요. 먼저 내 계정을 만들거나 로그인해 주세요.'),
         accountForm({ code }),
-        h('p', { class: 'privacy-note' }, PRIVACY_LINE),
+        h('p', { class: 'privacy-note' }, PRIVACY_LINE, ' ', h('a', { href: 'privacy.html', class: 'link-btn', 'data-testid': 'privacy' }, '개인정보 안내')),
         installHint(),
       ),
     );
@@ -2367,7 +2367,7 @@ function accountBox() {
       : '계정 없이 쓰고 있어요. 계정을 만들어 두면 새 휴대폰에서도 이어서 쓸 수 있어요.';
   return h('div', { class: 'account-box', 'data-testid': 'account-box' },
     h('div', { class: 'day-title', style: { margin: '18px 0 6px' } }, '내 계정'),
-    h('p', { class: 'account-note' }, line),
+    h('p', { class: 'account-note' }, line, ' ', h('a', { href: 'privacy.html', class: 'link-btn' }, '개인정보 안내')),
     h('div', { class: 'menu-list' },
       who.kind === 'guest'
         ? h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'account' }), 'data-testid': 'make-account' }, '계정 만들기')

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>공유 젤리 개인정보 안내</title>
+  <meta name="theme-color" content="#FFF9F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16131B" media="(prefers-color-scheme: dark)">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="stylesheet" href="fonts/pretendard/pretendardvariable-dynamic-subset.css">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .doc { max-width: 560px; margin: 0 auto; padding: 24px 4px 48px; line-height: 1.65; word-break: keep-all; }
+    .doc h1 { font-family: var(--display); font-weight: var(--display-weight); font-size: 24px; margin: 8px 0 4px; }
+    .doc h2 { font-size: 17px; margin: 28px 0 8px; }
+    .doc p, .doc li { font-size: 15px; color: var(--text); }
+    .doc ul { padding-left: 20px; margin: 6px 0; }
+    .doc .sub { color: var(--text-sub); font-size: 13px; }
+    .doc a { color: var(--accent); font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <main class="doc">
+      <p><a href="./">‹ 공유 젤리로 돌아가기</a></p>
+      <h1>공유 젤리 개인정보 안내</h1>
+      <p class="sub">젤리 캘린더의 ‘공유 젤리’와 ‘모두’에 적용돼요. 시행일: 2026년 10월 1일</p>
+
+      <h2>한 줄 요약</h2>
+      <p>공유 젤리의 이름, 시간, 메모 같은 내용은 달력에 들어온 사람의 기기에서만 열리도록 암호화되어 저장돼요. 서버를 운영하는 사람도 내용을 볼 수 없어요. 내 젤리(앱 안의 개인 일정)는 휴대폰 밖으로 나가지 않아요.</p>
+
+      <h2>저장하는 것과 그 이유</h2>
+      <ul>
+        <li><strong>계정</strong>: 로그인 아이디(서버에는 ‘아이디@id.jelly-calendar.invalid’ 꼴의 주소로 저장돼요), 또는 구글로 로그인했다면 구글 계정의 이메일 주소와 이름. 다시 로그인하고 다른 휴대폰에서 이어 쓰기 위해서예요.</li>
+        <li><strong>비밀번호</strong>: 원래 비밀번호는 서버로 보내지 않아요. 휴대폰에서 한 번 바꾼 값으로 로그인하고, 또 다른 값으로 ‘열쇠 보관함’을 잠가요.</li>
+        <li><strong>열쇠 보관함</strong>: 들어가 있는 공유 달력의 열쇠를 암호화해서 보관해요. 내 비밀번호(구글이면 따로 정한 열쇠 비밀번호)로만 열 수 있어요.</li>
+        <li><strong>공유 달력의 내용</strong>: 달력 이름, 달력에서 쓰는 이름과 색, 젤리의 이름·날짜·시간·길이·색·고정·다 먹음 여부·설명, 메모. 모두 암호화돼요.</li>
+        <li><strong>암호화되지 않는 것</strong>: 사용자 번호, 누가 어느 달력에 들어가 있는지와 만든 사람, 젤리와 메모를 쓰고 고친 사람과 시각, 메모 개수. 달력을 함께 쓰고 고친 사람을 표시하는 데 필요해요.</li>
+        <li><strong>초대 코드</strong>: 서버에는 코드에서 만든 번호, 만든 사람, 만료 시각(3일), 그리고 그 코드로만 열리게 잠근 달력 열쇠가 남아요. 코드 자체는 저장하지 않아요.</li>
+      </ul>
+
+      <h2>저장하는 곳</h2>
+      <p>Google Firebase(Cloud Firestore, Firebase Authentication)에 저장돼요. 화면 파일은 GitHub Pages에서 받아요. 광고나 분석 도구는 쓰지 않고, 다른 곳에 정보를 팔거나 넘기지 않아요.</p>
+
+      <h2>지우는 방법</h2>
+      <ul>
+        <li>공유 달력 메뉴(⋯)의 ‘이 달력에서 나가기’: 그 달력에서 내 자리를 지워요. 마지막 한 사람이 나가면 달력과 젤리, 메모가 모두 지워져요.</li>
+        <li>‘달력 지우기’: 만든 사람이 모든 사람에게서 달력을 지워요.</li>
+        <li>‘계정 지우기’: 들어가 있는 모든 달력에서 나간 뒤, 계정과 열쇠 보관함을 지워요. 되돌릴 수 없어요.</li>
+        <li>로그아웃하면 이 휴대폰에 있던 달력 열쇠도 지워져요.</li>
+      </ul>
+
+      <h2>알아 두실 점</h2>
+      <ul>
+        <li>비밀번호나 열쇠 비밀번호를 잊으면 되찾을 수 없어요. 그때는 함께 쓰는 사람에게 초대 코드를 다시 받아 들어가면 돼요.</li>
+        <li>달력에 함께 들어온 사람은 그 달력의 내용을 모두 볼 수 있어요. 초대 코드는 믿을 수 있는 사람에게만 보내 주세요.</li>
+      </ul>
+
+      <h2>문의</h2>
+      <p>앱이나 링크를 전해 준 사람(제작자)에게 연락해 주세요.</p>
+    </main>
+  </div>
+</body>
+</html>
