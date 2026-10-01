@@ -1,5 +1,6 @@
 // Security rules for shared jellies, run against the Firestore emulator:
 //   npm run test:rules
+// The rules cannot read sealed values, so the tests stand them in with strings of a sealed length.
 import { readFileSync } from 'node:fs';
 import { after, before, beforeEach, describe, test } from 'node:test';
 import {
@@ -21,7 +22,6 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 
-const SECRET = 'aaaaaaaaaaaaaaaaaaaaaaaa';
 let env;
 
 before(async () => {
@@ -44,135 +44,218 @@ beforeEach(async () => {
 });
 
 const db = (uid) => (uid ? env.authenticatedContext(uid).firestore() : env.unauthenticatedContext().firestore());
+/** Stands in for a sealed value (base64url of IV, ciphertext and tag). */
+const S = (length = 64) => 'Q'.repeat(length);
+/** Invite ids are 43 characters: base64url of 32 bytes derived from the code. */
+const INVITE = 'i'.repeat(43);
+const days = (n) => Timestamp.fromMillis(Date.now() + n * 86400000);
 
-/** Alice makes a space the way the app does: the space and her member doc in one batch. */
-async function aliceMakesSpace() {
+/** Alice makes a calendar the way the app does: the space and her member doc in one batch. */
+async function aliceMakesSpace(spaceId = 's1') {
   const store = db('alice');
   const batch = writeBatch(store);
-  batch.set(doc(store, 'spaces/s1'), { name: '우리 일정', secret: SECRET, createdBy: 'alice', createdAt: serverTimestamp() });
-  batch.set(doc(store, 'spaces/s1/members/alice'), { name: '창현', secret: SECRET, joinedAt: serverTimestamp() });
+  batch.set(doc(store, `spaces/${spaceId}`), { v: 2, owner: 'alice', createdAt: serverTimestamp(), meta: S() });
+  batch.set(doc(store, `spaces/${spaceId}/members/alice`), { joinedAt: serverTimestamp(), profile: S() });
   await assertSucceeds(batch.commit());
 }
 
+async function aliceInvites(id = INVITE, spaceId = 's1', expiresAt = days(3)) {
+  await assertSucceeds(setDoc(doc(db('alice'), `invites/${id}`), { spaceId, by: 'alice', expiresAt, wrapped: S(200) }));
+}
+
+async function join(uid, invite = INVITE, spaceId = 's1') {
+  return setDoc(doc(db(uid), `spaces/${spaceId}/members/${uid}`), { joinedAt: serverTimestamp(), profile: S(), invite });
+}
+
 async function bobJoins() {
-  await assertSucceeds(
-    setDoc(doc(db('bob'), 'spaces/s1/members/bob'), { name: '지은', secret: SECRET, joinedAt: serverTimestamp() }),
-  );
+  await aliceInvites();
+  await assertSucceeds(join('bob'));
 }
 
 function jelly(by, extra = {}) {
   return {
-    title: '저녁 약속',
-    date: '2026-10-03',
-    start: 19 * 60,
-    duration: 90,
-    flavor: 1,
-    done: false,
-    note: '',
+    title: S(),
+    date: S(),
+    start: S(),
+    duration: S(),
+    flavor: S(),
+    done: S(),
+    note: S(),
+    byName: S(),
+    updatedByName: S(),
     by,
-    byName: by,
     createdAt: serverTimestamp(),
     updatedBy: by,
-    updatedByName: by,
     updatedAt: serverTimestamp(),
     memoCount: 0,
     ...extra,
   };
 }
 
-describe('spaces and members', () => {
-  test('a space is created together with its first member', aliceMakesSpace);
+describe('calendars', () => {
+  test('a calendar is created together with its owner as first member', () => aliceMakesSpace());
 
-  test('a space cannot be created for someone else', async () => {
-    await assertFails(
-      setDoc(doc(db('mallory'), 'spaces/s2'), { name: 'x', secret: SECRET, createdBy: 'alice', createdAt: serverTimestamp() }),
-    );
+  test('a calendar needs its owner\'s member doc in the same batch', async () => {
+    await assertFails(setDoc(doc(db('alice'), 'spaces/s2'), { v: 2, owner: 'alice', createdAt: serverTimestamp(), meta: S() }));
   });
 
-  test('a short secret is refused', async () => {
-    await assertFails(
-      setDoc(doc(db('alice'), 'spaces/s2'), { name: 'x', secret: 'short', createdBy: 'alice', createdAt: serverTimestamp() }),
-    );
+  test('a calendar cannot be made for someone else, or with a made-up time', async () => {
+    const store = db('mallory');
+    const batch = writeBatch(store);
+    batch.set(doc(store, 'spaces/s2'), { v: 2, owner: 'alice', createdAt: serverTimestamp(), meta: S() });
+    batch.set(doc(store, 'spaces/s2/members/mallory'), { joinedAt: serverTimestamp(), profile: S() });
+    await assertFails(batch.commit());
+    const alice = db('alice');
+    const late = writeBatch(alice);
+    late.set(doc(alice, 'spaces/s3'), { v: 2, owner: 'alice', createdAt: Timestamp.fromMillis(0), meta: S() });
+    late.set(doc(alice, 'spaces/s3/members/alice'), { joinedAt: serverTimestamp(), profile: S() });
+    await assertFails(late.commit());
   });
 
-  test('joining needs the secret', async () => {
-    await aliceMakesSpace();
-    await assertFails(
-      setDoc(doc(db('mallory'), 'spaces/s1/members/mallory'), { name: '몰래', secret: 'b'.repeat(24), joinedAt: serverTimestamp() }),
-    );
-    await bobJoins();
+  test('a plain, unsealed name is refused', async () => {
+    const alice = db('alice');
+    const batch = writeBatch(alice);
+    batch.set(doc(alice, 'spaces/s2'), { v: 2, owner: 'alice', createdAt: serverTimestamp(), meta: '우리 일정' });
+    batch.set(doc(alice, 'spaces/s2/members/alice'), { joinedAt: serverTimestamp(), profile: S() });
+    await assertFails(batch.commit());
   });
 
-  test('nobody can add another person', async () => {
-    await aliceMakesSpace();
-    await assertFails(
-      setDoc(doc(db('alice'), 'spaces/s1/members/bob'), { name: '지은', secret: SECRET, joinedAt: serverTimestamp() }),
-    );
-  });
-
-  test('only members can read the space and its members', async () => {
+  test('only members read a calendar and its members; nobody lists calendars', async () => {
     await aliceMakesSpace();
     await assertFails(getDoc(doc(db('mallory'), 'spaces/s1')));
     await assertFails(getDocs(collection(db('mallory'), 'spaces/s1/members')));
     await assertFails(getDoc(doc(db(null), 'spaces/s1')));
     await assertSucceeds(getDoc(doc(db('alice'), 'spaces/s1')));
-    await bobJoins();
-    await assertSucceeds(getDocs(collection(db('bob'), 'spaces/s1/members')));
-  });
-
-  test('spaces cannot be listed', async () => {
-    await aliceMakesSpace();
     await assertFails(getDocs(collection(db('alice'), 'spaces')));
   });
 
-  test('members rename themselves only', async () => {
+  test('members rename the calendar; only the owner hands it on, and only to a member', async () => {
     await aliceMakesSpace();
     await bobJoins();
-    await assertSucceeds(updateDoc(doc(db('bob'), 'spaces/s1/members/bob'), { name: '지은이' }));
-    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/members/alice'), { name: '바꿈' }));
-    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/members/bob'), { secret: 'c'.repeat(24) }));
+    await assertSucceeds(updateDoc(doc(db('bob'), 'spaces/s1'), { meta: S(80) }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1'), { owner: 'bob' }));
+    await assertFails(updateDoc(doc(db('alice'), 'spaces/s1'), { owner: 'mallory' }));
+    await assertFails(updateDoc(doc(db('alice'), 'spaces/s1'), { v: 3 }));
+    await assertSucceeds(updateDoc(doc(db('alice'), 'spaces/s1'), { owner: 'bob' }));
   });
 
-  test('the secret of a space cannot be changed', async () => {
-    await aliceMakesSpace();
-    await assertFails(updateDoc(doc(db('alice'), 'spaces/s1'), { secret: 'd'.repeat(24) }));
-    await assertSucceeds(updateDoc(doc(db('alice'), 'spaces/s1'), { name: '주말 일정' }));
-  });
-
-  test('leaving removes access', async () => {
+  test('only the owner deletes a calendar', async () => {
     await aliceMakesSpace();
     await bobJoins();
+    await assertFails(deleteDoc(doc(db('bob'), 'spaces/s1')));
+    await assertSucceeds(deleteDoc(doc(db('alice'), 'spaces/s1')));
+  });
+
+  test('the creator of a calendar from before encryption can clear it away', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const store = ctx.firestore();
+      await setDoc(doc(store, 'spaces/old'), { name: '공유 젤리 달력', secret: 'x'.repeat(28), createdBy: 'alice' });
+      await setDoc(doc(store, 'spaces/old/members/alice'), { name: '창현', secret: 'x'.repeat(28) });
+      await setDoc(doc(store, 'spaces/old/members/bob'), { name: '지은', secret: 'x'.repeat(28) });
+      await setDoc(doc(store, 'spaces/old/jellies/j1'), { title: '예전 젤리', by: 'alice' });
+    });
+    await assertFails(deleteDoc(doc(db('bob'), 'spaces/old')));
+    await assertSucceeds(deleteDoc(doc(db('alice'), 'spaces/old/jellies/j1')));
+    await assertSucceeds(deleteDoc(doc(db('alice'), 'spaces/old/members/bob')));
+    const alice = db('alice');
+    const batch = writeBatch(alice);
+    batch.delete(doc(alice, 'spaces/old/members/alice'));
+    batch.delete(doc(alice, 'spaces/old'));
+    await assertSucceeds(batch.commit());
+  });
+});
+
+describe('joining and members', () => {
+  test('joining needs a live invite to that very calendar', async () => {
+    await aliceMakesSpace();
+    await aliceMakesSpace('s2');
+    await assertFails(join('mallory'));
+    await assertFails(setDoc(doc(db('mallory'), 'spaces/s1/members/mallory'), { joinedAt: serverTimestamp(), profile: S() }));
+    await aliceInvites('j'.repeat(43), 's2');
+    await assertFails(join('mallory', 'j'.repeat(43), 's1'));
+    await aliceInvites();
+    await assertSucceeds(join('bob'));
+    await assertSucceeds(getDocs(collection(db('bob'), 'spaces/s1/jellies')));
+  });
+
+  test('an expired invite lets nobody in', async () => {
+    await aliceMakesSpace();
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `invites/${INVITE}`), { spaceId: 's1', by: 'alice', expiresAt: days(-1), wrapped: S(200) });
+    });
+    await assertFails(join('bob'));
+  });
+
+  test('an invite to a deleted calendar lets nobody in', async () => {
+    await aliceMakesSpace();
+    await aliceInvites();
+    const alice = db('alice');
+    const batch = writeBatch(alice);
+    batch.delete(doc(alice, 'spaces/s1/members/alice'));
+    batch.delete(doc(alice, 'spaces/s1'));
+    await assertSucceeds(batch.commit());
+    await assertFails(join('bob'));
+  });
+
+  test('nobody can add another person', async () => {
+    await aliceMakesSpace();
+    await aliceInvites();
+    await assertFails(setDoc(doc(db('alice'), 'spaces/s1/members/bob'), { joinedAt: serverTimestamp(), profile: S(), invite: INVITE }));
+  });
+
+  test('members change their own name and colour only', async () => {
+    await aliceMakesSpace();
+    await bobJoins();
+    await assertSucceeds(updateDoc(doc(db('bob'), 'spaces/s1/members/bob'), { profile: S(90) }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/members/alice'), { profile: S(90) }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/members/bob'), { joinedAt: Timestamp.fromMillis(0) }));
+  });
+
+  test('the owner lets people go; others can only leave themselves', async () => {
+    await aliceMakesSpace();
+    await bobJoins();
+    await assertSucceeds(join('carol'));
+    await assertFails(deleteDoc(doc(db('bob'), 'spaces/s1/members/carol')));
+    await assertSucceeds(deleteDoc(doc(db('alice'), 'spaces/s1/members/carol')));
+    await assertFails(getDocs(collection(db('carol'), 'spaces/s1/jellies')));
     await assertSucceeds(deleteDoc(doc(db('bob'), 'spaces/s1/members/bob')));
     await assertFails(getDoc(doc(db('bob'), 'spaces/s1')));
   });
 });
 
 describe('invites', () => {
-  const inv = (by, spaceId = 's1', secret = SECRET) => ({
-    spaceId,
-    secret,
-    by,
-    expiresAt: Timestamp.fromMillis(Date.now() + 7 * 86400000),
-  });
-
-  test('a member makes an invite and anyone signed in can read it by code', async () => {
+  test('members make invites; anyone signed in reads one by its id; nobody lists them', async () => {
     await aliceMakesSpace();
-    await assertSucceeds(setDoc(doc(db('alice'), 'invites/ABCD2345'), inv('alice')));
-    const got = await assertSucceeds(getDoc(doc(db('bob'), 'invites/ABCD2345')));
-    if (got.data().secret !== SECRET) throw new Error('invite did not carry the secret');
-    await assertFails(getDoc(doc(db(null), 'invites/ABCD2345')));
-  });
-
-  test('invites cannot be listed', async () => {
-    await aliceMakesSpace();
-    await assertSucceeds(setDoc(doc(db('alice'), 'invites/ABCD2345'), inv('alice')));
+    await aliceInvites();
+    await assertSucceeds(getDoc(doc(db('bob'), `invites/${INVITE}`)));
+    await assertFails(getDoc(doc(db(null), `invites/${INVITE}`)));
     await assertFails(getDocs(collection(db('bob'), 'invites')));
   });
 
-  test('outsiders and wrong secrets cannot make invites', async () => {
+  test('outsiders, odd ids, long lives and old calendars get no invites', async () => {
     await aliceMakesSpace();
-    await assertFails(setDoc(doc(db('mallory'), 'invites/ZZZZ2345'), inv('mallory')));
-    await assertFails(setDoc(doc(db('alice'), 'invites/YYYY2345'), inv('alice', 's1', 'e'.repeat(24))));
+    const make = (uid, id, data) => setDoc(doc(db(uid), `invites/${id}`), { spaceId: 's1', by: uid, expiresAt: days(3), wrapped: S(200), ...data });
+    await assertFails(make('mallory', 'm'.repeat(43), {}));
+    await assertFails(make('alice', 'ABCDE23456', {}));
+    await assertFails(make('alice', 'a'.repeat(43), { expiresAt: days(5) }));
+    await assertFails(make('alice', 'b'.repeat(43), { expiresAt: days(-1) }));
+    await assertFails(make('alice', 'c'.repeat(43), { by: 'bob' }));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'spaces/old'), { name: 'x', secret: 'x'.repeat(28), createdBy: 'alice' });
+      await setDoc(doc(ctx.firestore(), 'spaces/old/members/alice'), { name: '창현', secret: 'x'.repeat(28) });
+    });
+    await assertFails(make('alice', 'd'.repeat(43), { spaceId: 'old' }));
+  });
+
+  test('the maker withdraws an invite; anyone clears it away once it has run out', async () => {
+    await aliceMakesSpace();
+    await aliceInvites();
+    await assertFails(deleteDoc(doc(db('bob'), `invites/${INVITE}`)));
+    await assertSucceeds(deleteDoc(doc(db('alice'), `invites/${INVITE}`)));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), `invites/${INVITE}`), { spaceId: 's1', by: 'alice', expiresAt: days(-1), wrapped: S(200) });
+    });
+    await assertSucceeds(deleteDoc(doc(db('bob'), `invites/${INVITE}`)));
   });
 });
 
@@ -184,15 +267,16 @@ describe('jellies and memos', () => {
     // Bob changes Alice's jelly; it stays hers.
     await assertSucceeds(
       updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), {
-        title: '저녁 약속 (7시 반)',
-        start: 19 * 60 + 30,
+        title: S(70),
+        start: S(70),
         updatedBy: 'bob',
-        updatedByName: '지은',
+        updatedByName: S(),
         updatedAt: serverTimestamp(),
       }),
     );
-    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), { by: 'bob', updatedBy: 'bob' }));
-    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), { title: '이름만', updatedBy: 'alice' }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), { by: 'bob', updatedBy: 'bob', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), { title: S(72), updatedBy: 'alice' }));
+    await assertFails(updateDoc(doc(db('bob'), 'spaces/s1/jellies/j1'), { title: S(72), updatedBy: 'bob', updatedAt: Timestamp.fromMillis(0) }));
     await assertSucceeds(deleteDoc(doc(db('bob'), 'spaces/s1/jellies/j1')));
   });
 
@@ -202,36 +286,37 @@ describe('jellies and memos', () => {
     await assertFails(getDoc(doc(db('mallory'), 'spaces/s1/jellies/j1')));
     await assertFails(getDocs(collection(db('mallory'), 'spaces/s1/jellies')));
     await assertFails(setDoc(doc(db('mallory'), 'spaces/s1/jellies/j2'), jelly('mallory')));
-    await assertFails(updateDoc(doc(db('mallory'), 'spaces/s1/jellies/j1'), { title: 'x', updatedBy: 'mallory' }));
+    await assertFails(updateDoc(doc(db('mallory'), 'spaces/s1/jellies/j1'), { title: S(70), updatedBy: 'mallory', updatedAt: serverTimestamp() }));
   });
 
   test('bad jellies are refused', async () => {
     await aliceMakesSpace();
     const ref = (id) => doc(db('alice'), `spaces/s1/jellies/${id}`);
-    await assertFails(setDoc(ref('a'), jelly('alice', { title: '' })));
-    await assertFails(setDoc(ref('b'), jelly('alice', { date: '10/3' })));
-    await assertFails(setDoc(ref('c'), jelly('alice', { duration: 0 })));
-    await assertFails(setDoc(ref('d'), jelly('alice', { start: 1440 })));
-    await assertFails(setDoc(ref('e'), jelly('alice', { by: 'bob' })));
-    await assertFails(setDoc(ref('f'), jelly('alice', { extra: true })));
-    await assertSucceeds(setDoc(ref('g'), jelly('alice', { start: null })));
+    const { title, ...untitled } = jelly('alice');
+    await assertFails(setDoc(ref('a'), untitled));
+    await assertFails(setDoc(ref('b'), jelly('alice', { title: '저녁 약속' })));
+    await assertFails(setDoc(ref('c'), jelly('alice', { note: S(6001) })));
+    await assertFails(setDoc(ref('d'), jelly('alice', { by: 'bob' })));
+    await assertFails(setDoc(ref('e'), jelly('alice', { extra: S() })));
+    await assertFails(setDoc(ref('f'), jelly('alice', { memoCount: 3 })));
+    await assertFails(setDoc(ref('g'), jelly('alice', { createdAt: Timestamp.fromMillis(0) })));
+    await assertSucceeds(setDoc(ref('h'), jelly('alice')));
   });
 
-  test('memos: anyone in the space writes, writers remove their own', async () => {
+  test('memos: anyone in the calendar writes, writers remove their own', async () => {
     await aliceMakesSpace();
     await bobJoins();
     await assertSucceeds(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1'), jelly('alice')));
     // Bob adds a memo and bumps the counter in one batch, as the app does.
     const bob = db('bob');
     const batch = writeBatch(bob);
-    batch.set(doc(bob, 'spaces/s1/jellies/j1/memos/m1'), { text: '역 앞에서 봐요', by: 'bob', byName: '지은', at: serverTimestamp() });
+    batch.set(doc(bob, 'spaces/s1/jellies/j1/memos/m1'), { text: S(), byName: S(), by: 'bob', at: serverTimestamp() });
     batch.update(doc(bob, 'spaces/s1/jellies/j1'), { memoCount: increment(1), lastMemoAt: serverTimestamp() });
     await assertSucceeds(batch.commit());
     await assertSucceeds(getDocs(collection(db('alice'), 'spaces/s1/jellies/j1/memos')));
     await assertFails(deleteDoc(doc(db('alice'), 'spaces/s1/jellies/j1/memos/m1')));
-    await assertFails(
-      setDoc(doc(db('alice'), 'spaces/s1/jellies/j1/memos/m2'), { text: '사칭', by: 'bob', byName: '지은', at: serverTimestamp() }),
-    );
+    await assertFails(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1/memos/m2'), { text: S(), byName: S(), by: 'bob', at: serverTimestamp() }));
+    await assertFails(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1/memos/m3'), { text: '평문 메모', byName: S(), by: 'alice', at: serverTimestamp() }));
     const undo = writeBatch(bob);
     undo.delete(doc(bob, 'spaces/s1/jellies/j1/memos/m1'));
     undo.update(doc(bob, 'spaces/s1/jellies/j1'), { memoCount: increment(-1) });
@@ -242,9 +327,7 @@ describe('jellies and memos', () => {
     await aliceMakesSpace();
     await bobJoins();
     await assertSucceeds(setDoc(doc(db('alice'), 'spaces/s1/jellies/j1'), jelly('alice')));
-    await assertSucceeds(
-      setDoc(doc(db('bob'), 'spaces/s1/jellies/j1/memos/m1'), { text: '좋아요', by: 'bob', byName: '지은', at: serverTimestamp() }),
-    );
+    await assertSucceeds(setDoc(doc(db('bob'), 'spaces/s1/jellies/j1/memos/m1'), { text: S(), byName: S(), by: 'bob', at: serverTimestamp() }));
     const alice = db('alice');
     const batch = writeBatch(alice);
     batch.delete(doc(alice, 'spaces/s1/jellies/j1/memos/m1'));

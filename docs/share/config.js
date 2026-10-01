@@ -10,3 +10,7 @@ export const firebaseConfig = {
   messagingSenderId: '593175955145',
   appId: '1:593175955145:web:392ac6365fc8785daf6f18',
 };
+
+// Where people open the shared calendar in a browser; invite links point here, also when the page
+// runs inside the Android app (which carries its own copy of it).
+export const publicUrl = 'https://ckdgus6068-sudo.github.io/ckdgus6068-sudo/share/';

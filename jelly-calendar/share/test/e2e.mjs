@@ -91,7 +91,7 @@ try {
   await tid(a, 'invite').click();
   await tid(a, 'invite-code').waitFor();
   const code = (await tid(a, 'invite-code').textContent()).trim();
-  check(/^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(code), `galaxy: invite code ${code}`);
+  check(/^[0-9A-Z]{5}-[0-9A-Z]{5}$/.test(code), `galaxy: invite code ${code}`);
   await shot(a, '2-galaxy-invite');
   await a.goBack();
 
@@ -180,6 +180,22 @@ try {
   await shot(a, '7-galaxy-month');
   const cells = await b.locator(`[data-day="${month}-17"] .mini`).count();
   check(cells === 2, 'iphone: two jellies on the 17th in the month grid');
+
+  // The server holds no readable names, titles or memos: look at the raw documents in the emulator.
+  const raw = await fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'jellies', allDescendants: true }, { collectionId: 'memos', allDescendants: true }] } }),
+  }).then((r) => r.text());
+  const members = await fetch('http://127.0.0.1:8080/v1/projects/demo-jelly/databases/(default)/documents:runQuery', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer owner' },
+    body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'members', allDescendants: true }] } }),
+  }).then((r) => r.text());
+  // Write times are kept in the clear (they look like 2026-10-01T05:52:11Z); the jellies' own dates are not.
+  const leaks = ['저녁 약속', '부모님 생신', '2번 출구', '7시 반에 봐요', '창현', '지은', `${month}-10`, `${month}-17`, '19:30', '1170']
+    .filter((t) => raw.includes(t) || members.includes(t));
+  check(raw.includes('"title"') && leaks.length === 0, `server copy is sealed (plain text found: ${leaks.join(', ') || 'none'})`);
 
   // 7. The shared box: the 17th as a box of soft jellies.
   const box = (page) => page.evaluate(() => window.__jellyBox?.centers() ?? []);

@@ -1,5 +1,5 @@
 // 공유 젤리: a month of jellies shared by two (or a few) people, on iPhone, Android or any browser.
-import { firebaseConfig } from './config.js';
+import { firebaseConfig, publicUrl } from './config.js';
 import * as store from './store.js';
 import { JellyBox } from './box.js';
 
@@ -47,9 +47,12 @@ const standalone = window.matchMedia?.('(display-mode: standalone)').matches || 
 // Inside the Android app: the app's side of the page (see MainActivity.ShareBridge).
 const bridge = window.JellyBridge || null;
 
+const savedColor = Number.parseInt(saved.get('color') ?? '', 10);
 const state = {
   uid: null,
   myName: saved.get('name') || '',
+  // My colour (a flavour index): my name's circle, and the colour my new jellies start with.
+  myColor: savedColor >= 0 && savedColor < 10 ? savedColor : Math.floor(Math.random() * 10),
   spaceId: saved.get('space'),
   space: null,
   members: [],
@@ -66,8 +69,7 @@ const state = {
 };
 const subs = { space: null, members: null, jellies: null, jelly: null, memos: null };
 let ready = false;
-let screen = null; // what #app shows: 'welcome' | 'month' | 'shared-box' | 'all'
-let watchedMonth = null;
+let screen = null; // what #app shows: 'welcome' | 'legacy' | 'month' | 'shared-box' | 'all'
 let pendingCode = '';
 let testMode = false;
 
@@ -182,13 +184,25 @@ function memberIndex(uid) {
   return i < 0 ? state.members.length : i;
 }
 
-function memberColor(uid) {
-  return MEMBER_COLORS[memberIndex(uid) % MEMBER_COLORS.length];
+/** The colour someone picked, as a flavour index, or null when they have not picked one. */
+function memberFlavor(uid) {
+  const color = state.members.find((m) => m.uid === uid)?.color;
+  return Number.isInteger(color) && color >= 0 && color < FLAVORS.length ? color : null;
 }
 
-/** The name someone goes by in the space, also for oneself. */
+function memberColor(uid) {
+  const flavor = memberFlavor(uid);
+  return flavor == null ? MEMBER_COLORS[memberIndex(uid) % MEMBER_COLORS.length] : FLAVORS[flavor].deep;
+}
+
+/** Letters on a member's colour: dark on the light lemon, white on the rest. */
+function memberInk(uid) {
+  return memberFlavor(uid) === 2 ? FLAVORS[2].ink : '#FFFFFF';
+}
+
+/** The name someone goes by in the calendar, also for oneself. */
 function realName(uid, fallback) {
-  return state.members.find((m) => m.uid === uid)?.name || fallback || '상대';
+  return state.members.find((m) => m.uid === uid)?.name || fallback || '알 수 없음';
 }
 
 /** "나" for oneself, otherwise the person's name. */
@@ -205,7 +219,7 @@ function avatar(uid, fallback, small = false) {
   const name = realName(uid, fallback);
   return h(
     'span',
-    { class: `avatar${small ? ' small' : ''}`, style: { background: memberColor(uid) }, title: name },
+    { class: `avatar${small ? ' small' : ''}`, style: { background: memberColor(uid), color: memberInk(uid) }, title: name },
     Array.from(name || '?')[0],
   );
 }
@@ -258,8 +272,13 @@ async function boot() {
 
   ready = true;
   pendingCode = codeFromLink();
-  if (state.spaceId) openSpace(state.spaceId);
-  else render();
+  if (state.spaceId) {
+    const key = saved.get(`key.${state.spaceId}`);
+    if (key) await store.useSpaceKey(state.spaceId, key).catch((e) => console.warn(e));
+    openSpace(state.spaceId);
+  } else {
+    render();
+  }
 }
 
 /** "#c=ABCD2345" in the address, from an invite link. */
@@ -321,17 +340,24 @@ function renderWelcome(code = '') {
   screen = 'welcome';
   document.body.classList.remove('fill');
   let busy = false;
+  let color = state.myColor;
   const name = h('input', {
     class: 'input',
-    placeholder: '내 이름 (상대에게 보여요)',
+    placeholder: '내 이름 (함께 쓰는 사람에게 보여요)',
     maxlength: '20',
     value: state.myName,
     'data-testid': 'name',
   });
+  const colors = h('div', { class: 'row' });
+  const paintColors = () => colors.replaceChildren(...colorSwatches(color, (i) => {
+    color = i;
+    paintColors();
+  }));
+  paintColors();
   const codeBox = h('input', {
     class: 'input code-input',
-    placeholder: 'ABCD-2345',
-    maxlength: '9',
+    placeholder: 'ABCDE-23456',
+    maxlength: String(store.CODE_LENGTH + 1),
     autocapitalize: 'characters',
     autocomplete: 'off',
     value: code ? store.prettyCode(code) : '',
@@ -353,10 +379,11 @@ function renderWelcome(code = '') {
     if (!n || busy) return;
     busy = true;
     try {
-      rememberName(n);
-      const id = await store.createSpace('공유 젤리 달력', n);
-      openSpace(id);
-      toast('공유 달력을 만들었어요. 메뉴에서 상대를 초대해 보세요');
+      rememberProfile(n, color);
+      const { spaceId, key } = await store.createSpace('공유 젤리 달력', { name: n, color });
+      saved.set(`key.${spaceId}`, key);
+      openSpace(spaceId);
+      toast('공유 달력을 만들었어요. 오른쪽 위 ⋯에서 함께 쓸 사람을 초대해 보세요');
     } catch (e) {
       console.error(e);
       toast('만들지 못했어요. 잠시 후 다시 해 주세요');
@@ -365,26 +392,37 @@ function renderWelcome(code = '') {
     }
   }
 
-  async function join() {
+  async function join(e) {
     const n = needName();
     if (!n || busy) return;
     const c = store.cleanCode(codeBox.value);
-    if (c.length !== 8) {
-      toast('초대 코드 8자리를 넣어 주세요');
+    if (c.length !== store.CODE_LENGTH) {
+      toast(`초대 코드 ${store.CODE_LENGTH}자리를 넣어 주세요`);
       codeBox.focus();
       return;
     }
     busy = true;
+    const button = e?.currentTarget;
+    const label = button?.textContent;
+    if (button) {
+      button.disabled = true;
+      button.textContent = '코드 확인하는 중…';
+    }
     try {
-      rememberName(n);
-      const id = await store.joinWithCode(c, n);
-      openSpace(id);
+      rememberProfile(n, color);
+      const { spaceId, key } = await store.joinWithCode(c, { name: n, color });
+      saved.set(`key.${spaceId}`, key);
+      openSpace(spaceId);
       toast('공유 달력에 들어왔어요');
-    } catch (e) {
-      console.error(e);
-      toast(e.message === 'expired-invite' ? '기간이 지난 초대 코드예요. 새 코드를 받아 주세요' : '초대 코드를 찾지 못했어요');
+    } catch (err) {
+      console.error(err);
+      toast(err.message === 'expired-invite' ? '기간이 지난 초대 코드예요. 새 코드를 받아 주세요' : '초대 코드를 찾지 못했어요. 코드를 다시 확인해 주세요');
     } finally {
       busy = false;
+      if (button?.isConnected) {
+        button.disabled = false;
+        button.textContent = label;
+      }
     }
   }
 
@@ -392,9 +430,11 @@ function renderWelcome(code = '') {
     h('div', { class: 'welcome' },
       h('img', { class: 'logo', src: 'icons/icon-192.png', alt: '' }),
       h('h1', null, '공유 젤리'),
-      h('p', null, '둘이 함께 보고 고치는 한 달 젤리 달력이에요.'),
+      h('p', null, '함께 보고 고치는 젤리 달력이에요.'),
       h('div', { class: 'field-label' }, '내 이름'),
       name,
+      h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
+      colors,
       code
         ? [
             h('div', { class: 'field-label' }, '받은 초대 코드'),
@@ -407,14 +447,32 @@ function renderWelcome(code = '') {
             codeBox,
             h('button', { class: 'btn ghost block', onClick: join, 'data-testid': 'join' }, '초대 코드로 들어가기'),
           ],
+      h('p', { class: 'privacy-note' }, PRIVACY_LINE),
       installHint(),
     ),
   );
 }
 
-function rememberName(n) {
+const PRIVACY_LINE = '이름, 색, 젤리, 메모는 달력에 들어온 사람의 기기에서만 열리도록 암호화되어 저장돼요. 서버를 운영하는 사람도 내용을 볼 수 없어요.';
+
+/** The ten flavours to pick a colour from. */
+function colorSwatches(current, onPick) {
+  return FLAVORS.map((f, i) => h('button', {
+    class: `swatch${current === i ? ' on' : ''}`,
+    type: 'button',
+    'aria-label': f.name,
+    'aria-pressed': current === i ? 'true' : 'false',
+    style: { background: f.base },
+    onClick: () => onPick(i),
+    'data-testid': `color-${i}`,
+  }));
+}
+
+function rememberProfile(n, color) {
   state.myName = n;
+  state.myColor = color;
   saved.set('name', n);
+  saved.set('color', String(color));
 }
 
 // ---------------------------------------------------------------- space
@@ -424,7 +482,6 @@ function closeSubs() {
     subs[key]?.();
     subs[key] = null;
   }
-  watchedMonth = null;
 }
 
 function openSpace(id) {
@@ -437,25 +494,40 @@ function openSpace(id) {
 
   const lost = (e) => {
     console.warn(e);
-    // Left the space, or the space is gone: start over.
-    if (e?.code === 'permission-denied') forgetSpace();
+    // Let go by the owner, or the calendar is gone: start over.
+    if (e?.code === 'permission-denied') forgetSpace('이 공유 달력에 더 이상 들어갈 수 없어요');
   };
   subs.space = store.watchSpace(id, (space) => {
+    if (!space) return forgetSpace('공유 달력이 지워졌어요');
+    if (space.locked) return forgetSpace('이 기기에 달력 열쇠가 없어요. 초대 코드를 다시 받아 주세요');
     state.space = space;
     render();
   }, lost);
   subs.members = store.watchMembers(id, (members) => {
     state.members = members;
     const mine = members.find((m) => m.uid === state.uid);
-    if (mine && mine.name !== state.myName) rememberName(mine.name);
+    if (mine?.name && (mine.name !== state.myName || mine.color !== state.myColor)) {
+      rememberProfile(mine.name, Number.isInteger(mine.color) ? mine.color : state.myColor);
+    }
     render();
     state.sheet?.repaint?.();
   }, lost);
+  subs.jellies = store.watchJellies(id, (jellies) => {
+    state.jellies = jellies;
+    render();
+  }, (e) => console.warn(e));
   render();
 }
 
-function forgetSpace() {
+/** This device stops using the calendar (after leaving it, deleting it, or being let go). */
+function forgetSpace(message) {
+  const id = state.spaceId;
   closeSubs();
+  if (state.sheet) hideSheet();
+  if (id) {
+    saved.set(`key.${id}`, null);
+    store.forgetSpaceKey(id);
+  }
   saved.set('space', null);
   state.spaceId = null;
   state.space = null;
@@ -463,21 +535,7 @@ function forgetSpace() {
   state.jellies = [];
   screen = null;
   render();
-}
-
-/** Listens to the jellies of the six weeks around [month], unless that is already the case. */
-function ensureMonth(month) {
-  if (!state.spaceId) return;
-  const key = isoDay(month).slice(0, 7);
-  if (watchedMonth === key) return;
-  watchedMonth = key;
-  subs.jellies?.();
-  state.jellies = [];
-  const days = gridDays(month);
-  subs.jellies = store.watchJellies(state.spaceId, isoDay(days[0]), isoDay(days[41]), (jellies) => {
-    state.jellies = jellies;
-    render();
-  }, (e) => console.warn(e));
+  if (message) toast(message);
 }
 
 /** Shows the month of an ISO day with that day selected. In the app's "모두" tab the app picks the day. */
@@ -528,7 +586,6 @@ function jelliesOn(iso) {
 function render() {
   if (!ready) return;
   if (isAll()) {
-    ensureMonth(firstOfMonth(parseDay(state.host.date)));
     renderAll();
     return;
   }
@@ -536,15 +593,55 @@ function render() {
     if (screen !== 'welcome') renderWelcome(pendingCode);
     return;
   }
-  ensureMonth(state.month);
+  if (state.space?.legacy) {
+    if (screen !== 'legacy') renderLegacy();
+    return;
+  }
   if (state.view === 'box') renderSharedBox();
   else renderMonth();
 }
 
+/** True when the calendar is open and readable on this device. */
+function usable() {
+  return !!state.spaceId && !!state.space && !state.space.legacy && !state.space.locked;
+}
+
 function membersButton() {
+  // Room for three circles; more people show as "+N", so the title keeps its line on small phones.
+  const shown = state.members.slice(0, 3);
+  const rest = state.members.length - shown.length;
   return h('button', { class: 'members', 'aria-label': '함께 쓰는 사람과 메뉴', onClick: () => openSheet({ kind: 'menu' }), 'data-testid': 'menu' },
-    state.members.map((m) => avatar(m.uid, m.name)),
+    shown.map((m) => avatar(m.uid, m.name)),
+    rest > 0 ? h('span', { class: 'avatar more-people' }, `+${rest}`) : null,
     h('span', { class: 'icon-btn', style: { width: '32px', fontSize: '20px' } }, '⋯'));
+}
+
+/** A calendar made before encryption: it can only be cleared away. */
+function renderLegacy() {
+  leaveBox();
+  screen = 'legacy';
+  document.body.classList.remove('fill');
+  const mine = state.space.owner === state.uid;
+  appEl().replaceChildren(
+    h('div', { class: 'center', 'data-testid': 'legacy' },
+      h('div', { class: 'display', style: { fontSize: '20px', color: 'var(--text)' } }, '공유 방식이 바뀌었어요'),
+      h('div', null, '이제 공유 젤리는 달력에 들어온 사람의 기기에서만 열리도록 암호화돼요. 예전 방식으로 만든 이 달력은 더 쓸 수 없어요.'),
+      h('button', {
+        class: 'btn',
+        'data-testid': 'clear-legacy',
+        onClick: async (e) => {
+          if (!confirm(mine ? '예전 달력과 그 안의 젤리를 서버에서 지울까요?' : '예전 달력에서 나갈까요?')) return;
+          e.currentTarget.disabled = true;
+          try {
+            if (mine) await store.deleteSpace(state.spaceId);
+            else await store.removeMember(state.spaceId, state.uid);
+          } catch (err) {
+            console.error(err);
+          }
+          forgetSpace(mine ? '예전 달력을 지웠어요. 새 달력을 만들어 다시 초대해 주세요' : '예전 달력에서 나왔어요');
+        },
+      }, mine ? '예전 달력 지우고 새로 시작' : '예전 달력에서 나가기')),
+  );
 }
 
 function header({ title, sub, testid, prev, next, prevLabel, nextLabel }) {
@@ -642,7 +739,7 @@ function renderMonth() {
       }, '+ 올리기')),
     list.length
       ? h('div', { class: 'cards' }, list.map((j, i) => card(j, i)))
-      : h('div', { class: 'empty' }, '이 날에 같이 할 일을 ‘+ 올리기’로 올려 보세요. 올린 젤리는 상대 화면에도 바로 나타나요.'),
+      : h('div', { class: 'empty' }, '이 날에 같이 할 일을 ‘+ 올리기’로 올려 보세요. 올린 젤리는 함께 쓰는 사람 화면에도 바로 나타나요.'),
   );
 
   appEl().replaceChildren(...[
@@ -743,7 +840,7 @@ function sharedItem(j) {
     duration: j.duration,
     flavor: j.flavor,
     done: !!j.done,
-    badge: { text: initial(realName(j.by, j.byName)), color: memberColor(j.by) },
+    badge: { text: initial(realName(j.by, j.byName)), color: memberColor(j.by), ink: memberInk(j.by) },
     ref: { kind: 'shared', id: j.id },
   };
 }
@@ -814,28 +911,30 @@ function renderAll() {
       // The box outlives day changes, so the day is read when the button is pressed.
       const date = state.host?.date;
       if (!date) return;
-      if (state.spaceId) openSheet({ kind: 'add', date });
+      if (usable()) openSheet({ kind: 'add', date });
       else bridge?.createPersonal?.(date);
     },
     (dir) => bridge?.shiftDay?.(dir),
   );
   const personal = (Array.isArray(host.personal) ? host.personal : []).filter((p) => p && p.id && p.title != null);
-  const shared = state.spaceId ? jelliesOn(host.date) : [];
+  const shared = usable() ? jelliesOn(host.date) : [];
   v.top.replaceChildren(
     h('div', { class: 'legend', 'data-testid': 'legend' },
       h('span', { class: 'legend-item' }, h('span', { class: 'legend-mine' }), `내 젤리 ${personal.length}`),
       h('span', { class: 'legend-item' },
         state.members.length
-          ? state.members.map((m) => avatar(m.uid, m.name, true))
+          ? state.members.slice(0, 4).map((m) => avatar(m.uid, m.name, true))
           : h('span', { class: 'avatar small', style: { background: MEMBER_COLORS[1] } }, '공'),
         `공유 젤리 ${shared.length}`),
       h('span', { class: 'legend-note' }, '동그라미 글자: 공유 젤리를 올린 사람')),
   );
   v.note.replaceChildren(...[
-    state.spaceId
+    usable()
       ? null
       : h('div', { class: 'banner', 'data-testid': 'no-space' },
-          h('div', null, '아직 공유 달력에 들어가지 않았어요. ‘공유 젤리’ 탭에서 달력을 만들거나 초대 코드로 들어가면, 공유 젤리도 이 상자에 함께 떨어져요.'),
+          h('div', null, state.space?.legacy
+            ? '공유 방식이 바뀌어 예전 공유 달력은 열 수 없어요. ‘공유 젤리’ 탭에서 정리한 뒤 새 달력을 만들어 주세요.'
+            : '아직 공유 달력에 들어가지 않았어요. ‘공유 젤리’ 탭에서 달력을 만들거나 초대 코드로 들어가면, 공유 젤리도 이 상자에 함께 떨어져요.'),
           bridge?.showShared ? h('button', { class: 'chip on', onClick: () => bridge.showShared() }, '열기') : null),
     offlineBanner(),
   ].filter(Boolean));
@@ -895,7 +994,7 @@ function buildJellySheet() {
   // The draft that is shown and edited; for an existing jelly, changes are saved as they happen.
   const draft = existing
     ? { ...existing }
-    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.jellies.length % FLAVORS.length, done: false, note: '' };
+    : { title: '', date: s.date || state.selected, start: null, duration: 60, flavor: state.myColor, done: false, note: '' };
 
   const preview = h('div', { class: 'jelly card', style: { animation: 'none', marginBottom: '6px' } });
   const title = h('input', {
@@ -1033,7 +1132,7 @@ function buildJellySheet() {
             seed: { ...fields, id, by: state.uid, byName: state.myName, updatedBy: state.uid, memoCount: 0, pending: true },
           };
           buildSheet();
-          toast(state.online ? '올렸어요. 상대 화면에도 바로 보여요' : '연결되면 바로 올라가요');
+          toast(state.online ? '올렸어요. 함께 쓰는 사람 화면에도 바로 보여요' : '연결되면 바로 올라가요');
         },
       }, '올리기'),
     );
@@ -1143,7 +1242,7 @@ function buildJellySheet() {
         s.sync(j);
       } else if (!s.deleting) {
         closeSheet();
-        toast('상대가 이 젤리를 지웠어요');
+        toast('다른 사람이 이 젤리를 지웠어요');
       }
     }, (e) => console.warn(e));
     paintWho(existing);
@@ -1164,23 +1263,26 @@ function buildJellySheet() {
 
 async function buildInviteSheet() {
   const body = h('div', null, h('div', { class: 'center', style: { minHeight: '120px' } }, '초대 코드를 만드는 중…'));
-  sheetFrame(h('div', { class: 'day-title' }, '상대 초대하기'), body);
+  sheetFrame(h('div', { class: 'day-title' }, '함께 쓸 사람 초대하기'), body);
   try {
-    const { code, expiresAt } = await store.makeInvite(state.spaceId);
+    const { code, id, expiresAt } = await store.makeInvite(state.spaceId);
     const pretty = store.prettyCode(code);
-    const link = `${location.origin}${location.pathname}#c=${code}`;
+    // Inside the app the page is a local copy, so links always point to the public address.
+    const base = testMode ? `${location.origin}${location.pathname}` : publicUrl;
+    const link = `${base}#c=${code}`;
+    const until = `${expiresAt.getMonth() + 1}월 ${expiresAt.getDate()}일`;
     const text = [
       '공유 젤리 달력에 초대해요.',
       `링크: ${link}`,
-      `초대 코드: ${pretty}`,
-      '아이폰은 사파리에서 링크를 연 뒤 공유 버튼 → ‘홈 화면에 추가’를 누르면 앱처럼 쓸 수 있어요. 홈 화면 아이콘으로 처음 열 때 이 코드를 넣어 주세요.',
+      `초대 코드: ${pretty} (${until}까지)`,
+      '아이폰: 사파리에서 링크를 열고, 들어가기 전에 공유 버튼 → ‘홈 화면에 추가’를 누른 뒤 홈 화면의 아이콘으로 열어 이 코드를 넣어 주세요.',
+      '갤럭시 앱: ‘공유 젤리’ 탭에서 이 코드를 넣어 주세요.',
     ].join('\n');
     body.replaceChildren(
       h('p', { style: { color: 'var(--text-sub)', fontSize: '14px' } },
-        '아래 코드나 링크를 상대에게 보내 주세요. 이 코드로 들어온 사람은 이 달력의 젤리를 보고, 고치고, 메모를 달 수 있어요.'),
+        '아래 코드나 링크를 함께 쓸 사람에게 보내 주세요. 이 코드로 들어온 사람은 이 달력의 젤리를 보고, 고치고, 메모를 달 수 있어요. 코드를 아는 사람은 누구나 들어올 수 있으니 믿는 사람에게만 보내 주세요.'),
       h('div', { class: 'big-code', 'data-testid': 'invite-code' }, pretty),
-      h('div', { class: 'more', style: { textAlign: 'center' } },
-        `${expiresAt.getMonth() + 1}월 ${expiresAt.getDate()}일까지 쓸 수 있어요`),
+      h('div', { class: 'more', style: { textAlign: 'center' } }, `${until}까지 여러 사람이 쓸 수 있어요`),
       h('div', { class: 'row', style: { marginTop: '16px', flexWrap: 'nowrap' } },
         h('button', { class: 'btn', style: { flex: '1' }, onClick: () => shareText(text) }, '보내기'),
         h('button', {
@@ -1188,6 +1290,21 @@ async function buildInviteSheet() {
           style: { flex: '1' },
           onClick: () => copyText(text),
         }, '복사하기')),
+      h('button', {
+        class: 'btn danger block',
+        style: { marginTop: '8px' },
+        'data-testid': 'cancel-invite',
+        onClick: async () => {
+          try {
+            await store.cancelInvite(id);
+            closeSheet();
+            toast('이 초대 코드는 이제 쓸 수 없어요');
+          } catch (e) {
+            console.error(e);
+            toast('취소하지 못했어요');
+          }
+        },
+      }, '이 코드 취소하기'),
     );
   } catch (e) {
     console.error(e);
@@ -1210,28 +1327,79 @@ function copyText(text) {
 }
 
 function buildMenuSheet() {
+  const owner = state.space?.owner;
+  const iOwn = owner === state.uid;
+  const people = h('div', { class: 'menu-list', style: { marginBottom: '14px' }, 'data-testid': 'members' });
+  const paintPeople = () => people.replaceChildren(...state.members.map((m) => h('div', { class: 'row member-row' },
+    avatar(m.uid, m.name),
+    h('span', { class: 'member-name' }, m.uid === state.uid ? `${m.name || '나'} (나)` : m.name || '이름 없음'),
+    m.uid === owner ? h('span', { class: 'chip owner-chip' }, '만든 사람') : null,
+    iOwn && m.uid !== state.uid
+      ? h('button', {
+          class: 'chip remove-chip',
+          'data-testid': 'remove',
+          onClick: async () => {
+            if (!confirm(`${m.name || '이 사람'}님을 이 달력에서 내보낼까요? 다시 들어오려면 새 초대 코드가 필요해요.`)) return;
+            try {
+              await store.removeMember(state.spaceId, m.uid);
+              toast(`${m.name || '그 사람'}님을 내보냈어요`);
+            } catch (e) {
+              console.error(e);
+              toast('내보내지 못했어요');
+            }
+          },
+        }, '내보내기')
+      : null)));
+  paintPeople();
+  state.sheet.repaint = paintPeople;
+
+  const alone = state.members.length <= 1;
   sheetFrame(
     h('div', { class: 'day-title', style: { marginBottom: '8px' } }, '함께 쓰는 사람'),
-    h('div', { class: 'menu-list', style: { marginBottom: '14px' } },
-      state.members.map((m) => h('div', { class: 'row' },
-        avatar(m.uid, m.name),
-        h('span', null, m.uid === state.uid ? `${m.name} (나)` : m.name)))),
+    people,
     h('div', { class: 'menu-list' },
-      h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'invite' }), 'data-testid': 'invite' }, '상대 초대하기'),
-      h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'name' }) }, '내 이름 바꾸기'),
+      h('button', { class: 'btn block', onClick: () => openReplace({ kind: 'invite' }), 'data-testid': 'invite' }, '함께 쓸 사람 초대하기'),
+      h('button', { class: 'btn ghost block', onClick: () => openReplace({ kind: 'name' }), 'data-testid': 'profile' }, '내 이름과 색 바꾸기'),
       h('button', {
         class: 'btn danger block',
-        onClick: async () => {
-          if (!confirm('이 공유 달력에서 나갈까요? 다시 들어오려면 초대 코드가 필요해요.')) return;
+        'data-testid': 'leave',
+        onClick: async (e) => {
+          const ask = alone
+            ? '마지막 한 사람이라 나가면 이 달력과 그 안의 젤리, 메모가 모두 지워져요. 나갈까요?'
+            : `이 달력에서 나갈까요? 다시 들어오려면 초대 코드가 필요해요.${iOwn ? ' 달력은 가장 먼저 들어온 사람에게 넘어가요.' : ''}`;
+          if (!confirm(ask)) return;
+          e.currentTarget.disabled = true;
           try {
             await store.leave(state.spaceId);
-          } catch (e) {
-            console.error(e);
+          } catch (err) {
+            console.error(err);
+            toast('나가지 못했어요. 인터넷 연결을 확인해 주세요');
+            e.currentTarget.disabled = false;
+            return;
           }
-          closeSheet();
-          forgetSpace();
+          forgetSpace(alone ? '달력을 지우고 나왔어요' : '달력에서 나왔어요');
         },
-      }, '이 달력에서 나가기')),
+      }, '이 달력에서 나가기'),
+      iOwn && !alone
+        ? h('button', {
+            class: 'btn danger block',
+            'data-testid': 'delete-space',
+            onClick: async (e) => {
+              if (!confirm('이 달력과 그 안의 젤리, 메모를 모든 사람에게서 지울까요? 되돌릴 수 없어요.')) return;
+              e.currentTarget.disabled = true;
+              try {
+                await store.deleteSpace(state.spaceId);
+              } catch (err) {
+                console.error(err);
+                toast('지우지 못했어요. 인터넷 연결을 확인해 주세요');
+                e.currentTarget.disabled = false;
+                return;
+              }
+              forgetSpace('달력을 지웠어요');
+            },
+          }, '달력 지우기 (모든 사람에게서)')
+        : null),
+    h('p', { class: 'privacy-note' }, PRIVACY_LINE),
   );
 }
 
@@ -1259,27 +1427,37 @@ function buildAddSheet() {
         class: 'btn ghost block',
         'data-testid': 'add-shared',
         onClick: () => openReplace({ kind: 'new', date }),
-      }, '공유 젤리 올리기 (상대도 봐요)')),
+      }, '공유 젤리 올리기 (함께 쓰는 사람도 봐요)')),
   );
 }
 
 function buildNameSheet() {
-  const name = h('input', { class: 'input', style: { width: '100%' }, maxlength: '20', value: state.myName });
+  let color = state.myColor;
+  const name = h('input', { class: 'input', style: { width: '100%' }, maxlength: '20', value: state.myName, 'data-testid': 'profile-name' });
+  const colors = h('div', { class: 'row' });
+  const paintColors = () => colors.replaceChildren(...colorSwatches(color, (i) => {
+    color = i;
+    paintColors();
+  }));
+  paintColors();
   sheetFrame(
-    h('div', { class: 'day-title' }, '내 이름 바꾸기'),
-    h('div', { class: 'field-label' }, '상대에게 보이는 이름'),
+    h('div', { class: 'day-title' }, '내 이름과 색 바꾸기'),
+    h('div', { class: 'field-label' }, '함께 쓰는 사람에게 보이는 이름'),
     name,
+    h('div', { class: 'field-label' }, '내 색 (내 이름 동그라미와 새 젤리의 기본 색)'),
+    colors,
     h('button', {
       class: 'btn block',
       style: { marginTop: '14px' },
+      'data-testid': 'profile-save',
       onClick: async () => {
         const n = name.value.trim();
         if (!n) return;
-        rememberName(n);
+        rememberProfile(n, color);
         try {
-          await store.rename(state.spaceId, n);
+          await store.updateProfile(state.spaceId, { name: n, color });
           closeSheet();
-          toast('이름을 바꿨어요');
+          toast('이름과 색을 바꿨어요');
         } catch (e) {
           console.error(e);
           toast('바꾸지 못했어요');
@@ -1287,12 +1465,11 @@ function buildNameSheet() {
       },
     }, '저장'),
   );
-  setTimeout(() => name.focus(), 50);
 }
 
 // ---------------------------------------------------------------- service worker
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+if ('serviceWorker' in navigator && location.protocol === 'https:' && !inApp) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
