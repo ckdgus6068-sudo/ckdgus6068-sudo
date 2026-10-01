@@ -4,10 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>젤리 캘린더</title>
+  <meta name="description" content="할 일을 말랑한 젤리로 놓는 달력이에요. 갤럭시는 앱을 받고, 아이폰은 공유 젤리를 열어 함께 써요.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="젤리 캘린더 받기">
+  <meta property="og:description" content="갤럭시는 앱(APK)을 받고, 아이폰은 사파리에서 공유 젤리를 열어요.">
+  <meta property="og:image" content="https://ckdgus6068-sudo.github.io/ckdgus6068-sudo/share/icons/icon-512.png">
+  <meta property="og:url" content="https://ckdgus6068-sudo.github.io/ckdgus6068-sudo/">
+  <meta name="theme-color" content="#FFF9F5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16131B" media="(prefers-color-scheme: dark)">
   <link rel="icon" type="image/png" sizes="32x32" href="share/icons/favicon-32.png">
   <link rel="apple-touch-icon" href="share/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="share/fonts/pretendard/pretendardvariable-dynamic-subset.css">
   <link rel="stylesheet" href="share/style.css">
+  <style>
+    .steps { text-align: left; margin: 10px 0 0; padding-left: 22px; font-size: 14px; line-height: 1.6; color: var(--text); word-break: keep-all; }
+    .steps li { margin: 4px 0; }
+    .steps small { display: block; color: var(--text-sub); font-size: 12.5px; }
+    .part { width: 100%; margin-top: 26px; text-align: left; }
+    .part h2 { font-size: 17px; margin: 0 0 8px; color: var(--text); }
+    .kakao { width: 100%; flex-direction: column; align-items: stretch; text-align: left; font-size: 14px; line-height: 1.55; word-break: keep-all; }
+    .kakao[hidden] { display: none; }
+    .kakao .btn { margin-top: 10px; }
+  </style>
 </head>
 <body>
   <div id="app">
@@ -15,11 +33,47 @@
       <img class="logo" src="share/icons/icon-192.png" alt="">
       <h1>젤리 캘린더</h1>
       <p>할 일을 말랑한 젤리로 놓는 달력이에요.</p>
-      <a class="btn block" href="share/" style="text-decoration:none;margin-top:16px">공유 젤리 열기</a>
-      <p style="font-size:13px">아이폰과 갤럭시에서 함께 쓰는 한 달 달력이에요. 아이폰은 사파리에서 연 뒤 ‘홈 화면에 추가’를 누르면 앱처럼 쓸 수 있어요.</p>
-      <a class="btn ghost block" href="https://github.com/ckdgus6068-sudo/ckdgus6068-sudo/releases/download/jelly-calendar-latest/JellyCalendar.apk" style="text-decoration:none;margin-top:16px">갤럭시 앱(APK) 받기</a>
-      <p style="font-size:13px">받은 뒤 크롬에서 ‘다운로드’ 확인을 누르고, ‘내 파일 → 다운로드’에서 파일을 눌러 설치하세요.</p>
+
+      <div class="banner kakao" id="kakao" hidden>
+        카카오톡 안의 화면에서는 설치 파일이 잘 받아지지 않아요. 아래 버튼을 눌러 크롬이나 삼성 인터넷으로 이 페이지를 다시 열어 주세요.
+        <a class="btn block" id="open-outside" href="#" style="text-decoration:none">다른 브라우저로 열기</a>
+        <small style="display:block;margin-top:6px;color:var(--text-sub)">버튼이 안 되면 오른쪽 아래(또는 위) 메뉴 ⋮에서 ‘다른 브라우저로 열기’를 눌러 주세요.</small>
+      </div>
+
+      <section class="part">
+        <h2>갤럭시: 앱 설치</h2>
+        <a class="btn block" href="https://github.com/ckdgus6068-sudo/ckdgus6068-sudo/releases/download/jelly-calendar-latest/JellyCalendar.apk" style="text-decoration:none" data-testid="apk">갤럭시 앱(APK) 받기</a>
+        <ol class="steps">
+          <li>위 버튼을 눌러 받아요. 파일이 위험할 수 있다는 안내가 나오면 그래도 받기를 골라요.</li>
+          <li>다 받으면 알림이나 ‘내 파일 → 다운로드’에서 <b>JellyCalendar.apk</b>를 눌러요.</li>
+          <li>‘출처를 알 수 없는 앱’ 안내가 나오면 ‘설정’으로 가서 <b>이 출처 허용</b>을 켜고 돌아와 ‘설치’를 눌러요.</li>
+          <li>Play 프로텍트 안내가 나오면 안내 창에서 설치를 이어 가는 쪽(예: ‘무시하고 설치’)을 골라요.
+            <small>스토어에 올리지 않은 앱이라 나오는 안내예요.</small></li>
+          <li>설치가 아예 막히면 설정 → 보안 및 개인정보 보호 → <b>자동 차단</b>을 잠시 끄고 다시 해 봐요.
+            <small>설치한 뒤에는 다시 켜도 돼요.</small></li>
+        </ol>
+        <p class="sub" style="font-size:13px;color:var(--text-sub);margin-top:8px">새 버전도 같은 방법으로 덮어 설치하면 내 젤리가 그대로 남아요.</p>
+      </section>
+
+      <section class="part">
+        <h2>아이폰: 공유 젤리</h2>
+        <a class="btn ghost block" href="share/" style="text-decoration:none">공유 젤리 열기</a>
+        <ol class="steps">
+          <li>사파리에서 열고, 가입하기 전에 공유 버튼 → ‘홈 화면에 추가’를 눌러요.</li>
+          <li>홈 화면의 ‘공유 젤리’ 아이콘으로 열어 아이디로 가입하고, 받은 초대 코드를 넣어요.</li>
+        </ol>
+      </section>
     </div>
   </div>
+  <script>
+    // KakaoTalk's own browser often fails to save an APK: offer to open this page in the phone's browser.
+    if (/KAKAOTALK/i.test(navigator.userAgent)) {
+      document.getElementById('kakao').hidden = false;
+      document.getElementById('open-outside').addEventListener('click', function (e) {
+        e.preventDefault();
+        location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(location.href);
+      });
+    }
+  </script>
 </body>
 </html>
